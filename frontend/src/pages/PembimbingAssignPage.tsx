@@ -1,16 +1,13 @@
-import React, { useState } from 'react';
-import AddDosenForm from '../components/AddDosenForm';
-import AddMahasiswaForm from '../components/AddMahasiswaForm';
+import React from 'react';
+import { Card } from '../components/ui/card';
 import AssignPembimbingForm from '../components/AssignPembimbingForm';
 
 const PembimbingAssignPage: React.FC = () => {
-  const [refresh, setRefresh] = useState(0);
   return (
-    <div className="space-y-8">
-      <AddDosenForm onSuccess={() => setRefresh(r => r + 1)} />
-      <AddMahasiswaForm onSuccess={() => setRefresh(r => r + 1)} />
-      <AssignPembimbingForm onSuccess={() => setRefresh(r => r + 1)} key={refresh} />
-    </div>
+    <Card className="max-w-2xl mx-auto mt-8 p-6 shadow-lg">
+      <h1 className="text-2xl font-bold mb-6 text-center">Penugasan Pembimbing</h1>
+      <AssignPembimbingForm onSuccess={() => {}} />
+    </Card>
   );
 };
 

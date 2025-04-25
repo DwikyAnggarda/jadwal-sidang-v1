@@ -1,14 +1,13 @@
-import React, { useState } from 'react';
+import React from 'react';
+import { Card } from '../components/ui/card';
 import AssignSidangForm from '../components/AssignSidangForm';
-import SidangListTable from '../components/SidangListTable';
 
 const SidangAssignPage: React.FC = () => {
-  const [refresh, setRefresh] = useState(0);
   return (
-    <div className="space-y-8">
-      <AssignSidangForm onSuccess={() => setRefresh(r => r + 1)} key={refresh} />
-      <SidangListTable key={refresh} />
-    </div>
+    <Card className="max-w-2xl mx-auto mt-8 p-6 shadow-lg">
+      <h1 className="text-2xl font-bold mb-6 text-center">Penjadwalan Sidang</h1>
+      <AssignSidangForm onSuccess={() => {}} />
+    </Card>
   );
 };
 

@@ -1,5 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api/axios';
+import { Card } from './ui/card';
+// import { Button } from './ui/button';
+import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 
 interface Sidang {
   id: number;
@@ -12,6 +15,8 @@ interface Sidang {
   moderator_nama: string;
   room: string;
   tanggal_sidang: string;
+  jam_mulai_sidang?: string;
+  durasi_sidang?: number;
 }
 
 const SidangListTable: React.FC = () => {
@@ -26,43 +31,54 @@ const SidangListTable: React.FC = () => {
       .finally(() => setLoading(false));
   }, []);
 
-  if (loading) return <div>Loading...</div>;
-  if (error) return <div className="text-red-600">Error: {error}</div>;
+  if (loading) return <div className="text-center py-8">Loading...</div>;
+  if (error) return (
+    <Alert variant="destructive" className="max-w-2xl mx-auto my-8">
+      <AlertTitle>Error</AlertTitle>
+      <AlertDescription>{error}</AlertDescription>
+    </Alert>
+  );
 
   return (
-    <div className="overflow-x-auto">
-      <h2 className="text-xl font-bold mb-4">Daftar Sidang</h2>
-      <table className="min-w-full border bg-white">
-        <thead>
-          <tr>
-            <th className="border px-2 py-1">Nama Mahasiswa</th>
-            <th className="border px-2 py-1">Departemen</th>
-            <th className="border px-2 py-1">Pembimbing 1</th>
-            <th className="border px-2 py-1">Pembimbing 2</th>
-            <th className="border px-2 py-1">Penguji 1</th>
-            <th className="border px-2 py-1">Penguji 2</th>
-            <th className="border px-2 py-1">Moderator</th>
-            <th className="border px-2 py-1">Ruangan</th>
-            <th className="border px-2 py-1">Tanggal Sidang</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((s) => (
-            <tr key={s.id}>
-              <td className="border px-2 py-1">{s.mahasiswa_nama}</td>
-              <td className="border px-2 py-1">{s.mahasiswa_departemen}</td>
-              <td className="border px-2 py-1">{s.pembimbing_1_nama}</td>
-              <td className="border px-2 py-1">{s.pembimbing_2_nama}</td>
-              <td className="border px-2 py-1">{s.penguji_1_nama}</td>
-              <td className="border px-2 py-1">{s.penguji_2_nama}</td>
-              <td className="border px-2 py-1">{s.moderator_nama}</td>
-              <td className="border px-2 py-1">{s.room}</td>
-              <td className="border px-2 py-1">{s.tanggal_sidang}</td>
+    <Card className="max-w-6xl mx-auto mt-8 p-6 shadow-lg">
+      <h2 className="text-2xl font-bold mb-6 text-center">Daftar Sidang</h2>
+      <div className="overflow-x-auto">
+        <table className="min-w-full border bg-white rounded-lg text-sm">
+          <thead className="bg-neutral-100">
+            <tr>
+              <th className="border px-3 py-2">Nama Mahasiswa</th>
+              <th className="border px-3 py-2">Departemen</th>
+              <th className="border px-3 py-2">Pembimbing 1</th>
+              <th className="border px-3 py-2">Pembimbing 2</th>
+              <th className="border px-3 py-2">Penguji 1</th>
+              <th className="border px-3 py-2">Penguji 2</th>
+              <th className="border px-3 py-2">Moderator</th>
+              <th className="border px-3 py-2">Ruangan</th>
+              <th className="border px-3 py-2">Tanggal</th>
+              <th className="border px-3 py-2">Jam Mulai</th>
+              <th className="border px-3 py-2">Durasi (menit)</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {data.map((s) => (
+              <tr key={s.id} className="hover:bg-neutral-50 transition">
+                <td className="border px-3 py-2 font-medium">{s.mahasiswa_nama}</td>
+                <td className="border px-3 py-2">{s.mahasiswa_departemen}</td>
+                <td className="border px-3 py-2">{s.pembimbing_1_nama}</td>
+                <td className="border px-3 py-2">{s.pembimbing_2_nama}</td>
+                <td className="border px-3 py-2">{s.penguji_1_nama}</td>
+                <td className="border px-3 py-2">{s.penguji_2_nama}</td>
+                <td className="border px-3 py-2">{s.moderator_nama}</td>
+                <td className="border px-3 py-2">{s.room}</td>
+                <td className="border px-3 py-2">{s.tanggal_sidang}</td>
+                <td className="border px-3 py-2">{s.jam_mulai_sidang || '-'}</td>
+                <td className="border px-3 py-2">{s.durasi_sidang ?? '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
   );
 };
 

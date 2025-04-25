@@ -1,5 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api/axios';
+import { useForm } from 'react-hook-form';
+import { Card } from './ui/card';
+import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from './ui/form';
+import { Input } from './ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Button } from './ui/button';
+import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 
 interface Mahasiswa {
   id: number;
@@ -10,45 +17,45 @@ interface Dosen {
   id: number;
   nama: string;
   departemen: string;
-  bimbingan_saat_ini?: number;
-  maksimal_bimbingan?: number;
+}
+interface FormValues {
+  mahasiswa: string;
+  pembimbing_1: string;
+  pembimbing_2: string;
 }
 
 const AssignPembimbingForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
   const [mahasiswaList, setMahasiswaList] = useState<Mahasiswa[]>([]);
   const [dosenList, setDosenList] = useState<Dosen[]>([]);
-  const [mahasiswaId, setMahasiswaId] = useState('');
-  const [pembimbing1, setPembimbing1] = useState('');
-  const [pembimbing2, setPembimbing2] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+
+  const form = useForm<FormValues>({
+    defaultValues: {
+      mahasiswa: '',
+      pembimbing_1: '',
+      pembimbing_2: '',
+    },
+  });
 
   useEffect(() => {
     api.get<Mahasiswa[]>('/mahasiswa?without_pembimbing=true').then(res => setMahasiswaList(res.data));
     api.get<Dosen[]>('/dosen').then(res => setDosenList(res.data));
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const onSubmit = async (values: FormValues) => {
     setLoading(true);
     setError(null);
     setSuccess(false);
-    if (pembimbing1 === pembimbing2) {
-      setError('Pembimbing 1 dan 2 harus berbeda');
-      setLoading(false);
-      return;
-    }
     try {
       await api.post('/pembimbing/assign', {
-        mahasiswa_id: parseInt(mahasiswaId, 10),
-        pembimbing_1_id: parseInt(pembimbing1, 10),
-        pembimbing_2_id: parseInt(pembimbing2, 10),
+        mahasiswa_id: values.mahasiswa,
+        pembimbing_1_id: values.pembimbing_1,
+        pembimbing_2_id: values.pembimbing_2,
       });
       setSuccess(true);
-      setMahasiswaId('');
-      setPembimbing1('');
-      setPembimbing2('');
+      form.reset();
       onSuccess();
     } catch (err: any) {
       setError(err.response?.data || err.message);
@@ -58,39 +65,97 @@ const AssignPembimbingForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }
   };
 
   return (
-    <form onSubmit={handleSubmit} className="mb-6 p-4 bg-white rounded shadow max-w-md">
-      <h3 className="font-semibold mb-2">Assign Pembimbing</h3>
-      <div className="mb-2">
-        <label className="block mb-1">Mahasiswa</label>
-        <select value={mahasiswaId} onChange={e => setMahasiswaId(e.target.value)} className="border rounded px-2 py-1 w-full" required>
-          <option value="">Pilih Mahasiswa</option>
-          {mahasiswaList.map(m => (
-            <option key={m.id} value={m.id}>{m.nama} ({m.departemen})</option>
-          ))}
-        </select>
-      </div>
-      <div className="mb-2">
-        <label className="block mb-1">Pembimbing 1</label>
-        <select value={pembimbing1} onChange={e => setPembimbing1(e.target.value)} className="border rounded px-2 py-1 w-full" required>
-          <option value="">Pilih Dosen</option>
-          {dosenList.map(d => (
-            <option key={d.id} value={d.id}>{d.nama} ({d.departemen})</option>
-          ))}
-        </select>
-      </div>
-      <div className="mb-2">
-        <label className="block mb-1">Pembimbing 2</label>
-        <select value={pembimbing2} onChange={e => setPembimbing2(e.target.value)} className="border rounded px-2 py-1 w-full" required>
-          <option value="">Pilih Dosen</option>
-          {dosenList.map(d => (
-            <option key={d.id} value={d.id}>{d.nama} ({d.departemen})</option>
-          ))}
-        </select>
-      </div>
-      <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded" disabled={loading}>{loading ? 'Assigning...' : 'Assign'}</button>
-      {error && <div className="text-red-600 mt-2">{error}</div>}
-      {success && <div className="text-green-600 mt-2">Pembimbing berhasil ditugaskan</div>}
-    </form>
+    <Card className="max-w-md mx-auto p-6 mt-6 shadow-lg">
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <h3 className="font-semibold text-lg mb-4 text-center">Assign Pembimbing</h3>
+          <FormField
+            control={form.control}
+            name="mahasiswa"
+            rules={{ required: 'Pilih mahasiswa' }}
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Mahasiswa</FormLabel>
+                <FormControl>
+                  <Select value={field.value} onValueChange={field.onChange} required>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Pilih Mahasiswa" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {mahasiswaList.map(m => (
+                        <SelectItem key={m.id} value={String(m.id)}>{m.nama} ({m.departemen})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="pembimbing_1"
+            rules={{ required: 'Pilih pembimbing 1' }}
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Pembimbing 1</FormLabel>
+                <FormControl>
+                  <Select value={field.value} onValueChange={field.onChange} required>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Pilih Pembimbing 1" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {dosenList.map(d => (
+                        <SelectItem key={d.id} value={String(d.id)}>{d.nama} ({d.departemen})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="pembimbing_2"
+            rules={{ required: 'Pilih pembimbing 2' }}
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Pembimbing 2</FormLabel>
+                <FormControl>
+                  <Select value={field.value} onValueChange={field.onChange} required>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Pilih Pembimbing 2" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {dosenList.map(d => (
+                        <SelectItem key={d.id} value={String(d.id)}>{d.nama} ({d.departemen})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <Button type="submit" className="w-full" disabled={loading}>
+            {loading ? 'Assigning...' : 'Assign'}
+          </Button>
+          {error && (
+            <Alert variant="destructive">
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          {success && (
+            <Alert>
+              <AlertTitle>Sukses</AlertTitle>
+              <AlertDescription>Pembimbing berhasil ditugaskan</AlertDescription>
+            </Alert>
+          )}
+        </form>
+      </Form>
+    </Card>
   );
 };
 

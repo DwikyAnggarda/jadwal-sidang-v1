@@ -1,23 +1,37 @@
 import React, { useState } from 'react';
 import api from '../api/axios';
+import { useForm } from 'react-hook-form';
+import { Card } from './ui/card';
+import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from './ui/form';
+import { Input } from './ui/input';
+import { Button } from './ui/button';
+import { Alert, AlertDescription, AlertTitle } from './ui/alert';
+
+interface FormValues {
+  nama: string;
+  departemen: string;
+}
 
 const AddMahasiswaForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
-  const [nama, setNama] = useState('');
-  const [departemen, setDepartemen] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const form = useForm<FormValues>({
+    defaultValues: {
+      nama: '',
+      departemen: '',
+    },
+  });
+
+  const onSubmit = async (values: FormValues) => {
     setLoading(true);
     setError(null);
     setSuccess(false);
     try {
-      await api.post('/mahasiswa', { nama, departemen });
+      await api.post('/mahasiswa', values);
       setSuccess(true);
-      setNama('');
-      setDepartemen('');
+      form.reset();
       onSuccess();
     } catch (err: any) {
       setError(err.response?.data || err.message);
@@ -27,20 +41,56 @@ const AddMahasiswaForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =>
   };
 
   return (
-    <form onSubmit={handleSubmit} className="mb-6 p-4 bg-white rounded shadow max-w-md">
-      <h3 className="font-semibold mb-2">Tambah Mahasiswa</h3>
-      <div className="mb-2">
-        <label className="block mb-1">Nama</label>
-        <input type="text" value={nama} onChange={e => setNama(e.target.value)} className="border rounded px-2 py-1 w-full" required />
-      </div>
-      <div className="mb-2">
-        <label className="block mb-1">Departemen</label>
-        <input type="text" value={departemen} onChange={e => setDepartemen(e.target.value)} className="border rounded px-2 py-1 w-full" required />
-      </div>
-      <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded" disabled={loading}>{loading ? 'Menyimpan...' : 'Tambah'}</button>
-      {error && <div className="text-red-600 mt-2">{error}</div>}
-      {success && <div className="text-green-600 mt-2">Mahasiswa berhasil ditambahkan</div>}
-    </form>
+    <Card className="max-w-md mx-auto p-6 mt-6 shadow-lg">
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <h3 className="font-semibold text-lg mb-4 text-center">Tambah Mahasiswa</h3>
+          <FormField
+            control={form.control}
+            name="nama"
+            rules={{ required: 'Nama mahasiswa wajib diisi' }}
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Nama Mahasiswa</FormLabel>
+                <FormControl>
+                  <Input type="text" {...field} required />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="departemen"
+            rules={{ required: 'Departemen wajib diisi' }}
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Departemen</FormLabel>
+                <FormControl>
+                  <Input type="text" {...field} required />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <Button type="submit" className="w-full" disabled={loading}>
+            {loading ? 'Menyimpan...' : 'Simpan'}
+          </Button>
+          {error && (
+            <Alert variant="destructive">
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          {success && (
+            <Alert>
+              <AlertTitle>Sukses</AlertTitle>
+              <AlertDescription>Mahasiswa berhasil ditambahkan</AlertDescription>
+            </Alert>
+          )}
+        </form>
+      </Form>
+    </Card>
   );
 };
 

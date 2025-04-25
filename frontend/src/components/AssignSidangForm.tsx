@@ -1,5 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import api from '../api/axios';
+import { useForm } from 'react-hook-form';
+import { Card } from './ui/card';
+import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from './ui/form';
+import { Input } from './ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
+import { Button } from './ui/button';
+import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 
 interface Mahasiswa {
   id: number;
@@ -9,34 +16,53 @@ interface Mahasiswa {
   pembimbing_2_id?: number;
 }
 
+interface FormValues {
+  mahasiswa: string;
+  tanggal_sidang: string;
+  jam_mulai_sidang: string;
+  durasi_sidang: string;
+  room: string;
+}
+
 const AssignSidangForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
   const [mahasiswaList, setMahasiswaList] = useState<Mahasiswa[]>([]);
-  const [mahasiswaId, setMahasiswaId] = useState('');
-  const [tanggalSidang, setTanggalSidang] = useState('');
-  const [room, setRoom] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [warning, setWarning] = useState<string | null>(null);
+
+  const form = useForm<FormValues>({
+    defaultValues: {
+      mahasiswa: '',
+      tanggal_sidang: '',
+      jam_mulai_sidang: '',
+      durasi_sidang: '',
+      room: '',
+    },
+  });
 
   useEffect(() => {
     api.get<Mahasiswa[]>('/mahasiswa?with_pembimbing=true&without_sidang=true').then(res => setMahasiswaList(res.data));
   }, []);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const onSubmit = async (values: FormValues) => {
     setLoading(true);
     setError(null);
     setSuccess(false);
+    setWarning(null);
     try {
-      await api.post('/sidang/assign', {
-        mahasiswa_id: mahasiswaId,
-        tanggal_sidang: tanggalSidang,
-        room,
+      const res = await api.post('/sidang/assign', {
+        mahasiswa_id: values.mahasiswa,
+        tanggal_sidang: values.tanggal_sidang,
+        jam_mulai_sidang: values.jam_mulai_sidang,
+        durasi_sidang: values.durasi_sidang,
+        room: values.room,
       });
+      if (res.data && res.data.warning) {
+        setWarning(res.data.warning);
+      }
       setSuccess(true);
-      setMahasiswaId('');
-      setTanggalSidang('');
-      setRoom('');
+      form.reset();
       onSuccess();
     } catch (err: any) {
       setError(err.response?.data || err.message);
@@ -46,29 +72,113 @@ const AssignSidangForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =>
   };
 
   return (
-    <form onSubmit={handleSubmit} className="mb-6 p-4 bg-white rounded shadow max-w-md">
-      <h3 className="font-semibold mb-2">Assign Jadwal Sidang</h3>
-      <div className="mb-2">
-        <label className="block mb-1">Mahasiswa</label>
-        <select value={mahasiswaId} onChange={e => setMahasiswaId(e.target.value)} className="border rounded px-2 py-1 w-full" required>
-          <option value="">Pilih Mahasiswa</option>
-          {mahasiswaList.map(m => (
-            <option key={m.id} value={m.id}>{m.nama} ({m.departemen})</option>
-          ))}
-        </select>
-      </div>
-      <div className="mb-2">
-        <label className="block mb-1">Tanggal Sidang</label>
-        <input type="date" value={tanggalSidang} onChange={e => setTanggalSidang(e.target.value)} className="border rounded px-2 py-1 w-full" required />
-      </div>
-      <div className="mb-2">
-        <label className="block mb-1">Ruangan</label>
-        <input type="text" value={room} onChange={e => setRoom(e.target.value)} className="border rounded px-2 py-1 w-full" required />
-      </div>
-      <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded" disabled={loading}>{loading ? 'Assigning...' : 'Assign'}</button>
-      {error && <div className="text-red-600 mt-2">{error}</div>}
-      {success && <div className="text-green-600 mt-2">Jadwal sidang berhasil ditetapkan</div>}
-    </form>
+    <Card className="max-w-md mx-auto p-6 mt-6 shadow-lg">
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <h3 className="font-semibold text-lg mb-4 text-center">Assign Jadwal Sidang</h3>
+          <FormField
+            control={form.control}
+            name="mahasiswa"
+            rules={{ required: 'Pilih mahasiswa' }}
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Mahasiswa</FormLabel>
+                <FormControl>
+                  <Select value={field.value} onValueChange={field.onChange} required>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Pilih Mahasiswa" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {mahasiswaList.map(m => (
+                        <SelectItem key={m.id} value={String(m.id)}>{m.nama} ({m.departemen})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="tanggal_sidang"
+            rules={{ required: 'Tanggal sidang wajib diisi' }}
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Tanggal Sidang</FormLabel>
+                <FormControl>
+                  <Input type="date" {...field} required />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="jam_mulai_sidang"
+            rules={{ required: 'Jam mulai sidang wajib diisi' }}
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Jam Mulai Sidang</FormLabel>
+                <FormControl>
+                  <Input type="time" {...field} required />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="durasi_sidang"
+            rules={{ required: 'Durasi sidang wajib diisi' }}
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Durasi Sidang (menit)</FormLabel>
+                <FormControl>
+                  <Input type="number" min={1} {...field} required />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="room"
+            rules={{ required: 'Ruangan wajib diisi' }}
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Ruangan</FormLabel>
+                <FormControl>
+                  <Input type="text" {...field} required />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <Button type="submit" className="w-full" disabled={loading}>
+            {loading ? 'Assigning...' : 'Assign'}
+          </Button>
+          {error && (
+            <Alert variant="destructive">
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+          {success && (
+            <Alert>
+              <AlertTitle>Sukses</AlertTitle>
+              <AlertDescription>Jadwal sidang berhasil ditetapkan</AlertDescription>
+            </Alert>
+          )}
+          {warning && (
+            <Alert>
+              <AlertTitle>Peringatan</AlertTitle>
+              <AlertDescription>{warning}</AlertDescription>
+            </Alert>
+          )}
+        </form>
+      </Form>
+    </Card>
   );
 };
 

@@ -77,10 +77,10 @@ app.post('/mahasiswa', async (req, res) => {
 
 // Endpoint untuk mengotomatisasi penentuan dosen dan jadwal sidang
 app.post('/sidang/assign', async (req, res) => {
-    const { mahasiswa_id, tanggal_sidang, room } = req.body;
+    const { mahasiswa_id, tanggal_sidang, jam_mulai_sidang, durasi_sidang, room } = req.body;
 
-    if (!mahasiswa_id || !tanggal_sidang || !room) {
-        return res.status(400).send('Field mahasiswa_id, tanggal_sidang, dan room diperlukan');
+    if (!mahasiswa_id || !tanggal_sidang || !jam_mulai_sidang || !durasi_sidang || !room) {
+        return res.status(400).send('Field mahasiswa_id, tanggal_sidang, jam_mulai_sidang, durasi_sidang, dan room diperlukan');
     }
 
     try {
@@ -93,14 +93,22 @@ app.post('/sidang/assign', async (req, res) => {
             return res.status(400).send('Mahasiswa sudah memiliki sidang');
         }
 
-        // Cek ketersediaan ruangan
-        const roomBusyResult = await pool.query(
-            'SELECT 1 FROM sidang WHERE room = $1 AND tanggal_sidang = $2',
-            [room, tanggal_sidang]
+        // Cek jumlah mahasiswa di room pada tanggal dan jam yang sama
+        const roomSidangResult = await pool.query(
+            'SELECT COUNT(*) as count FROM sidang WHERE room = $1 AND tanggal_sidang = $2 AND jam_mulai_sidang = $3',
+            [room, tanggal_sidang, jam_mulai_sidang]
         );
-        if (roomBusyResult.rows.length > 0) {
-            return res.status(400).send('Ruangan sudah dipesan pada tanggal_sidang tersebut');
+        const sidangCount = parseInt(roomSidangResult.rows[0].count, 10);
+        if (sidangCount >= 5) {
+            return res.status(400).send('Room sudah penuh pada jam tersebut');
         }
+        let warning = null;
+        if (sidangCount < 1) {
+            warning = 'Warning: Room ini baru berisi 1 mahasiswa pada sesi ini.';
+        }
+
+        // Cek tidak ada sidang lain di room pada jam_mulai_sidang yang sama (tanggal boleh sama)
+        // Sudah dicek di atas dengan count, jadi tidak perlu pengecekan tambahan
 
         // Ambil pembimbing dari mahasiswa
         const mahasiswaResult = await pool.query(
@@ -115,44 +123,60 @@ app.post('/sidang/assign', async (req, res) => {
             return res.status(400).send('Mahasiswa belum memiliki pembimbing');
         }
 
-        // Cek ketersediaan pembimbing pada tanggal_sidang tersebut
-        const busyDosenResult = await pool.query(`
-            SELECT DISTINCT unnest(array[pembimbing_1_id, pembimbing_2_id, penguji_1_id, penguji_2_id, moderator_id]) as dosen_id
-            FROM sidang
-            WHERE tanggal_sidang = $1
-        `, [tanggal_sidang]);
-        const busyDosenIds = busyDosenResult.rows.map(row => row.dosen_id);
-
-        if (busyDosenIds.includes(pembimbing_1_id) || busyDosenIds.includes(pembimbing_2_id)) {
-            return res.status(400).send('Pembimbing tidak tersedia pada tanggal_sidang tersebut');
+        // Cek pembimbing tidak double-booked di room lain pada jam dan tanggal yang sama
+        const pembimbingBusyResult = await pool.query(
+            'SELECT 1 FROM sidang WHERE tanggal_sidang = $1 AND jam_mulai_sidang = $2 AND room != $3 AND (pembimbing_1_id = $4 OR pembimbing_2_id = $4 OR pembimbing_1_id = $5 OR pembimbing_2_id = $5)',
+            [tanggal_sidang, jam_mulai_sidang, room, pembimbing_1_id, pembimbing_2_id]
+        );
+        if (pembimbingBusyResult.rows.length > 0) {
+            return res.status(400).send('Pembimbing tidak tersedia pada jam dan tanggal tersebut di ruangan lain');
         }
 
         // Ambil dosen yang tersedia untuk penguji dan moderator
-        const availableDosenResult = await pool.query(`
-            SELECT * FROM dosen
-            WHERE id NOT IN ($1, $2)
-            AND id NOT IN (
-                SELECT unnest(array[pembimbing_1_id, pembimbing_2_id, penguji_1_id, penguji_2_id, moderator_id])
-                FROM sidang
-                WHERE tanggal_sidang = $3
-            )
-        `, [pembimbing_1_id, pembimbing_2_id, tanggal_sidang]);
-        const availableDosen = availableDosenResult.rows;
-
-        if (availableDosen.length < 3) {
-            return res.status(400).send('Tidak cukup dosen tersedia untuk penguji dan moderator');
+        // Penguji tidak boleh pembimbing, moderator boleh
+        const availableDosenResult = await pool.query(
+            'SELECT * FROM dosen WHERE id NOT IN ($1, $2)',
+            [pembimbing_1_id, pembimbing_2_id]
+        );
+        let availableDosen = availableDosenResult.rows;
+        // Filter dosen yang sudah menjadi penguji/moderator di sidang lain pada waktu yang sama
+        const dosenBusyResult = await pool.query(
+            `SELECT DISTINCT unnest(array[pembimbing_1_id, pembimbing_2_id, penguji_1_id, penguji_2_id, moderator_id]) as dosen_id
+             FROM sidang WHERE tanggal_sidang = $1 AND jam_mulai_sidang = $2`,
+            [tanggal_sidang, jam_mulai_sidang]
+        );
+        const busyDosenIds = dosenBusyResult.rows.map(row => row.dosen_id);
+        // Penguji tidak boleh pembimbing, dan tidak boleh dosen yang sudah jadi penguji/moderator di waktu yang sama
+        const pengujiCandidates = availableDosen.filter(d => !busyDosenIds.includes(d.id));
+        if (pengujiCandidates.length < 2) {
+            return res.status(400).send('Tidak cukup dosen tersedia untuk penguji');
+        }
+        // Pilih dua penguji
+        const [penguji1, penguji2] = pengujiCandidates.slice(0, 2);
+        // Moderator: boleh pembimbing, tapi tidak boleh penguji
+        const moderatorCandidates = availableDosenResult.rows.filter(d => d.id !== penguji1.id && d.id !== penguji2.id);
+        let moderator = moderatorCandidates[0];
+        if (!moderator) {
+            // Jika tidak ada dosen lain, boleh pakai pembimbing sebagai moderator
+            const pembimbingResult = await pool.query('SELECT * FROM dosen WHERE id IN ($1, $2)', [pembimbing_1_id, pembimbing_2_id]);
+            moderator = pembimbingResult.rows.find(d => d.id !== penguji1.id && d.id !== penguji2.id);
+            if (!moderator) {
+                return res.status(400).send('Tidak ada dosen yang bisa menjadi moderator');
+            }
         }
 
-        // Pilih tiga dosen berbeda untuk penguji dan moderator
-        const [penguji1, penguji2, moderator] = availableDosen.slice(0, 3);
-
         // Simpan ke tabel sidang
-        await pool.query(`
-            INSERT INTO sidang (mahasiswa_id, pembimbing_1_id, pembimbing_2_id, penguji_1_id, penguji_2_id, moderator_id, room, tanggal_sidang)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-        `, [mahasiswa_id, pembimbing_1_id, pembimbing_2_id, penguji1.id, penguji2.id, moderator.id, room, tanggal_sidang]);
+        await pool.query(
+            `INSERT INTO sidang (mahasiswa_id, pembimbing_1_id, pembimbing_2_id, penguji_1_id, penguji_2_id, moderator_id, room, tanggal_sidang, jam_mulai_sidang, durasi_sidang)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+            [mahasiswa_id, pembimbing_1_id, pembimbing_2_id, penguji1.id, penguji2.id, moderator.id, room, tanggal_sidang, jam_mulai_sidang, durasi_sidang]
+        );
 
-        res.send('Penugasan berhasil');
+        if (warning) {
+            return res.status(200).json({ message: 'Penugasan berhasil', warning });
+        } else {
+            return res.send('Penugasan berhasil');
+        }
     } catch (err) {
         console.error(err);
         res.status(500).send('Server error');
