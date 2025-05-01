@@ -1,6 +1,11 @@
 const express = require('express');
 const cors = require('cors');
 const pool = require('./db');
+const multer = require('multer');
+const xlsx = require('xlsx');
+const upload = multer({ dest: 'uploads/' });
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 app.use(cors());
@@ -21,29 +26,42 @@ app.get('/dosen', async (req, res) => {
 app.get('/mahasiswa', async (req, res) => {
     try {
         const { without_pembimbing, with_pembimbing, without_sidang } = req.query;
-        let query = 'SELECT * FROM mahasiswa';
+        // Act Mode
+
+        // Build base query with LEFT JOIN to dosen for pembimbing_1 and pembimbing_2
+        let query = `
+            SELECT m.*, 
+               d1.nama AS pembimbing_1_nama, 
+               d2.nama AS pembimbing_2_nama
+            FROM mahasiswa m
+            LEFT JOIN dosen d1 ON m.pembimbing_1_id = d1.id
+            LEFT JOIN dosen d2 ON m.pembimbing_2_id = d2.id
+        `;
         const conditions = [];
+        const values = [];
+
+        // Apply filters if present
         if (without_pembimbing === 'true') {
-            conditions.push('pembimbing_1_id IS NULL AND pembimbing_2_id IS NULL');
+            conditions.push('m.pembimbing_1_id IS NULL AND m.pembimbing_2_id IS NULL');
         }
         if (with_pembimbing === 'true') {
-            conditions.push('pembimbing_1_id IS NOT NULL AND pembimbing_2_id IS NOT NULL');
+            conditions.push('m.pembimbing_1_id IS NOT NULL AND m.pembimbing_2_id IS NOT NULL');
         }
         if (without_sidang === 'true') {
-            conditions.push('id NOT IN (SELECT mahasiswa_id FROM sidang)');
+            conditions.push('NOT EXISTS (SELECT 1 FROM sidang s WHERE s.mahasiswa_id = m.id)');
         }
         if (conditions.length > 0) {
             query += ' WHERE ' + conditions.join(' AND ');
         }
-        query += ' ORDER BY nama ASC';
+        query += ' ORDER BY m.nama ASC';
 
-        const result = await pool.query(query);
+        const result = await pool.query(query, values);
         res.json(result.rows);
-    } catch (err) {
+        } catch (err) {
         console.error(err);
         res.status(500).send('Server error');
-    }
-});
+        }
+    });
 
 // Endpoint untuk menambahkan dosen
 app.post('/dosen', async (req, res) => {
@@ -240,7 +258,7 @@ app.get('/sidang', async (req, res) => {
                    s.penguji_1_id, d3.nama as penguji_1_nama,
                    s.penguji_2_id, d4.nama as penguji_2_nama,
                    s.moderator_id, d5.nama as moderator_nama,
-                   s.room, TO_CHAR(s.tanggal_sidang, 'YYYY-MM-DD') as tanggal_sidang
+                   s.room, TO_CHAR(s.tanggal_sidang, 'YYYY-MM-DD') as tanggal_sidang, s.jam_mulai_sidang, s.durasi_sidang
             FROM sidang s
             JOIN mahasiswa m ON s.mahasiswa_id = m.id
             JOIN dosen d1 ON s.pembimbing_1_id = d1.id
@@ -268,6 +286,184 @@ app.get('/sidang', async (req, res) => {
     } catch (err) {
         console.error(err);
         res.status(500).send('Server error');
+    }
+});
+
+// Endpoint batch assign jadwal sidang
+app.post('/sidang/batch-assign', upload.single('file'), async (req, res) => {
+    const { tanggal_sidang, jam_mulai_sidang, durasi_sidang } = req.body;
+    if (!tanggal_sidang || !jam_mulai_sidang || !durasi_sidang || !req.file) {
+        return res.status(400).json({ success: false, message: 'Field tanggal_sidang, jam_mulai_sidang, durasi_sidang, dan file diperlukan' });
+    }
+
+    // Parse Excel
+    let mahasiswaList;
+    try {
+        const workbook = xlsx.readFile(req.file.path);
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        mahasiswaList = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        // Remove header
+        mahasiswaList = mahasiswaList.slice(1).filter(row => row[0]);
+    } catch (err) {
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({ success: false, message: 'File excel tidak valid' });
+    }
+    fs.unlinkSync(req.file.path);
+
+    // Format: [NRP, Nama Mahasiswa, Judul, Nama Dosen Pembimbing 1, Nama Dosen Pembimbing 2]
+    // Validasi data mahasiswa & dosen
+    try {
+        // Ambil semua dosen
+        const dosenResult = await pool.query('SELECT id, nama FROM dosen');
+        const dosenMap = {};
+        dosenResult.rows.forEach(d => { dosenMap[d.nama.trim().toLowerCase()] = d; });
+
+        // Ambil semua mahasiswa
+        const mahasiswaResult = await pool.query('SELECT id, nrp, nama FROM mahasiswa');
+        const mahasiswaMap = {};
+        mahasiswaResult.rows.forEach(m => { mahasiswaMap[m.nrp] = m; });
+
+        // Siapkan data mahasiswa sidang
+        const sidangMahasiswa = [];
+        for (const row of mahasiswaList) {
+            const [nrp, nama, judul, dosen1, dosen2] = row;
+            if (!nrp || !nama || !judul || !dosen1 || !dosen2) {
+                return res.status(400).json({ success: false, message: `Data tidak lengkap pada NRP ${nrp}` });
+            }
+            const mhs = mahasiswaResult.rows.find(m => m.nrp == nrp);
+            if (!mhs) {
+                return res.status(400).json({ success: false, message: `Mahasiswa dengan NRP ${nrp} tidak ditemukan di database` });
+            }
+            const d1 = dosenMap[dosen1.trim().toLowerCase()];
+            const d2 = dosenMap[dosen2.trim().toLowerCase()];
+            if (!d1 || !d2) {
+                return res.status(400).json({ success: false, message: `Dosen pembimbing tidak ditemukan untuk NRP ${nrp}` });
+            }
+            sidangMahasiswa.push({
+                nrp, nama, judul,
+                mahasiswa_id: mhs.id,
+                pembimbing_1_id: d1.id,
+                pembimbing_2_id: d2.id,
+                pembimbing_1_nama: d1.nama,
+                pembimbing_2_nama: d2.nama
+            });
+        }
+
+        // Cek dosen penguji cukup
+        const allPembimbingIds = sidangMahasiswa.flatMap(m => [m.pembimbing_1_id, m.pembimbing_2_id]);
+        const pengujiCandidates = dosenResult.rows.filter(d => !allPembimbingIds.includes(d.id));
+        const totalSidang = sidangMahasiswa.length;
+        if (pengujiCandidates.length < 2) {
+            return res.status(400).json({ success: false, message: 'dosen penguji kurang dari kebutuhan, tambahkan dosen lagi di data dosen' });
+        }
+
+        // Grouping room (max 3 per room)
+        const rooms = [];
+        for (let i = 0; i < sidangMahasiswa.length; i += 3) {
+            rooms.push(sidangMahasiswa.slice(i, i + 3));
+        }
+
+        // Penjadwalan jam dan assign penguji/moderator
+        // Ambil semua dosen penguji yang bukan pembimbing
+        let pengujiPool = pengujiCandidates.map(d => d.id);
+        if (pengujiPool.length < 2) {
+            return res.status(400).json({ success: false, message: 'dosen penguji kurang dari kebutuhan, tambahkan dosen lagi di data dosen' });
+        }
+
+        // Untuk rollback jika error
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+            let output = [];
+            let no = 1;
+            for (let roomIdx = 0; roomIdx < rooms.length; roomIdx++) {
+                const group = rooms[roomIdx];
+                let jamMulai = jam_mulai_sidang;
+                for (let idx = 0; idx < group.length; idx++) {
+                    const m = group[idx];
+                    // Moderator = pembimbing 1
+                    const moderator_id = m.pembimbing_1_id;
+                    const moderator_nama = m.pembimbing_1_nama;
+
+                    // Penguji 1 & 2: bukan pembimbing 1/2, bukan moderator, dan tidak sama satu sama lain
+                    // Pilih penguji dari pool yang bukan pembimbing 1/2
+                    const pengujiAvailable = dosenResult.rows.filter(d =>
+                        d.id !== m.pembimbing_1_id &&
+                        d.id !== m.pembimbing_2_id
+                    );
+                    if (pengujiAvailable.length < 2) {
+                        await client.query('ROLLBACK');
+                        return res.status(400).json({ success: false, message: 'dosen penguji kurang dari kebutuhan, tambahkan dosen lagi di data dosen' });
+                    }
+                    // Pilih penguji 1 dan 2 yang berbeda
+                    const penguji_1 = pengujiAvailable[0];
+                    const penguji_2 = pengujiAvailable[1];
+
+                    // Hitung jam mulai dan selesai
+                    const [jam, menit] = jamMulai.split(':').map(Number);
+                    const durasi = parseInt(durasi_sidang, 10);
+                    const jamSelesaiDate = new Date(2000, 0, 1, jam, menit + durasi);
+                    const jamSelesai = jamSelesaiDate.getHours().toString().padStart(2, '0') + ':' + jamSelesaiDate.getMinutes().toString().padStart(2, '0');
+                    const jamMulaiFinal = jam.toString().padStart(2, '0') + ':' + menit.toString().padStart(2, '0');
+
+                    // Insert ke tabel sidang
+                    await client.query(
+                        `INSERT INTO sidang (
+                            mahasiswa_id, pembimbing_1_id, pembimbing_2_id, penguji_1_id, penguji_2_id, moderator_id, room, tanggal_sidang, jam_mulai_sidang, durasi_sidang, jam_mulai_final, jam_selesai_final
+                        ) VALUES (
+                            $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
+                        )`,
+                        [
+                            m.mahasiswa_id,
+                            m.pembimbing_1_id,
+                            m.pembimbing_2_id,
+                            penguji_1.id,
+                            penguji_2.id,
+                            moderator_id,
+                            roomIdx + 1,
+                            tanggal_sidang,
+                            jamMulai,
+                            durasi,
+                            jamMulaiFinal,
+                            jamSelesai
+                        ]
+                    );
+
+                    output.push({
+                        no: no++,
+                        jam_mulai_final: jamMulaiFinal,
+                        jam_selesai_final: jamSelesai,
+                        durasi_sidang: durasi,
+                        tanggal: tanggal_sidang,
+                        nrp: m.nrp,
+                        nama_mahasiswa: m.nama,
+                        judul: m.judul,
+                        moderator: moderator_nama,
+                        pembimbing_1: m.pembimbing_1_nama,
+                        pembimbing_2: m.pembimbing_2_nama,
+                        penguji_1: penguji_1.nama,
+                        penguji_2: penguji_2.nama,
+                        room: roomIdx + 1
+                    });
+
+                    // Update jamMulai untuk mahasiswa berikutnya di room yang sama
+                    const jamMulaiDate = new Date(2000, 0, 1, jam, menit + durasi * (idx + 1));
+                    jamMulai = jamMulaiDate.getHours().toString().padStart(2, '0') + ':' + jamMulaiDate.getMinutes().toString().padStart(2, '0');
+                }
+            }
+            await client.query('COMMIT');
+            return res.json(output);
+        } catch (err) {
+            await client.query('ROLLBACK');
+            console.error(err);
+            return res.status(500).json({ success: false, message: 'Terjadi error saat insert data: ' + err.message });
+        } finally {
+            client.release();
+        }
+    } catch (err) {
+        console.error(err);
+        return res.status(500).json({ success: false, message: 'Server error: ' + err.message });
     }
 });
 

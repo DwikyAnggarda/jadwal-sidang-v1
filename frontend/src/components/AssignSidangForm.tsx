@@ -52,10 +52,10 @@ const AssignSidangForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =>
     setWarning(null);
     try {
       const res = await api.post('/sidang/assign', {
-        mahasiswa_id: values.mahasiswa,
+        mahasiswa_id: parseInt(values.mahasiswa, 10),
         tanggal_sidang: values.tanggal_sidang,
         jam_mulai_sidang: values.jam_mulai_sidang,
-        durasi_sidang: values.durasi_sidang,
+        durasi_sidang: parseInt(values.durasi_sidang, 10),
         room: values.room,
       });
       if (res.data && res.data.warning) {

@@ -50,9 +50,9 @@ const AssignPembimbingForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }
     setSuccess(false);
     try {
       await api.post('/pembimbing/assign', {
-        mahasiswa_id: values.mahasiswa,
-        pembimbing_1_id: values.pembimbing_1,
-        pembimbing_2_id: values.pembimbing_2,
+        mahasiswa_id: parseInt(values.mahasiswa, 10),
+        pembimbing_1_id: parseInt(values.pembimbing_1, 10),
+        pembimbing_2_id: parseInt(values.pembimbing_2, 10),
       });
       setSuccess(true);
       form.reset();

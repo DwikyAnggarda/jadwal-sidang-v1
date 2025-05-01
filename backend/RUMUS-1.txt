@@ -1,0 +1,51 @@
+saya ada tambahan API di dalam file ini: server.js. jadi API nya adalah batch assign jadwal sidang dimana kebutuhan request body-nya seperti ini:
+1. tanggal sidang
+2. jam mulai sidang
+3. durasi sidang
+4. file excel yang di-upload dimana susunan kolomnya adalah NRP, Nama Mahasiswa, Judul, Nama Dosen Pembimbing 1, Nama Dosen Pembimbing 2
+
+tujuannya adalah untuk insert ke table sidang dan dari request body tersebut jika sudah terpenuhi semuanya maka ada rumus yang harus diterapkan. kurang lebih seperti ini:
+
+saya asumsikan menjadi huruf agar mudah dipahami oleh kamu. jadi:
+- NRP = z
+- Nama Mahasiswa = m
+- Judul = y
+- Nama Dosen Pembimbing 1 = a
+- Nama Dosen Pembimbing 2 = b
+
+selanjutnya:
+- hitung total room dengan rumus ini: total mahasiswa dibagi 3 (kenapa 3? karena 1 room itu maksimal ada 3 mahasiswa dengan 3 moderator berbeda). namun kasih kondisi jika memang 1 room ternyata total mahasiswanya di bawah 3 maka tidak mengapa (intinya minimal ada 1 mahasiswa)
+- moderator saya asumsikan dengan alias f, dosen penguji 1 dengan alias c & dosen penguji 1 dengan alias d
+- f = a, artinya moderator adalah dosen pembimbing 1
+- f != c || d, artinya pastikan moderator tidak boleh dari dosen penguji 1 dan 2
+- (c || d != a) && (c || d !=b), artinya dosen penguji 1 dan 2 <> dosen pembimbing 1 dan dosen penguji 1 dan 2 <> dosen pembimbing 2
+- karena 1 room maksimal ada 3 mahasiswa, maka saya asumsikan lagi seperti ini: m,m1,m2 = 3 mahasiswa tersebut. a,a1,a2 = dosen pembimbing 1. b,b1,b2 = dosen pembimbing 2. c,c1,c2 = dosen penguji 1.
+d,d1,d2 = dosen penguji 2, f,f1,f2 = moderator
+- maka, c != (a || b) yang artinya merupakan moderator mahasiswa ke 2 (f1)
+- maka, d != (a || b) yang artinya merupakan moderator mahasiswa ke 3 (f2)
+- berarti untuk bisa mencapai pengelompokan room tadi maka diperlukan perulangan sesuai rumus dan ketentuan yang sudah saya sebutkan sebelumnya
+
+selanjutnya, untuk pengelompokan jam mulai sidang dan durasi sidang maka asumsinya kurang lebih seperti ini:
+## jika jam mulai sidangnya 13.00 dan durasi sidangnya 30 menit, maka susunannya seperti ini:
+- room 1
+	- mahasiswa A: jam mulai final = 13.00 & jam selesai final = 13.30
+	- mahasiswa B: jam mulai final = 14.00 & jam selesai final = 14.30
+	- mahasiswa C: jam mulai final = 15.00 & jam selesai final = 15.30
+- room 2
+	- mahasiswa E: jam mulai final = 13.00 & jam selesai final = 13.30
+	- mahasiswa F: jam mulai final = 14.00 & jam selesai final = 14.30
+	- mahasiswa G: jam mulai final = 15.00 & jam selesai final = 15.30
+- room 3
+	- mahasiswa H: jam mulai final = 13.00 & jam selesai final = 13.30
+	- mahasiswa I: jam mulai final = 14.00 & jam selesai final = 14.30
+	- mahasiswa J: jam mulai final = 15.00 & jam selesai final = 15.30
+## kurang lebih seperti di atas susunan untuk mendapatkan jam mulai final dan jam selesai final
+
+terakhir, kurang lebih secara outputnya seperti ini:
+No | Waktu       | Tanggal      | NRP         | Nama Mahasiswa                        | Judul PA                                                       | Moderator                           | Dosen Pembimbing 1                | Dosen Pembimbing 2                | Dosen Penguji 1                   | Dosen Penguji 2               
+---|------------ |--------------|------------|-------------------------------------|----------------------------------------------------------------|-------------------------------------|----------------------------------|----------------------------------|----------------------------------|----------------------------------
+1  | 13.00-13.30 | 11 April 2025 | 3122510628  | Fadhilah Alfa Nur Khoiriyah         | SISTEM INFORMASI MANAJEMEN PERPUSTAKAAN BERBASIS WEB DI SMP NEGERI 5 KOTA MOJOKERTO | Mu'arifin, S.ST., M.T              | Mu'arifin, S.ST., M.T             | Nailussa`ada, S.ST., M.Tr.Kom     | Dian Septiani Santoso, M.Kom.    | Mohammad Robihul Mufid, M.Tr.Kom 
+2  | 14.00-14.30 | 11 April 2025 | 3122510609  | Tiara Putri Ramadhani               | SISTEM INFORMASI EMPOWERING ACADEMIC STRESS COMMUNICATION       | Dian Septiani Santoso, M.Kom       | Dian Septiani Santoso, M.Kom      | Hero Yudo Martono, ST, MT.        | Khoironi, S.Kom., M.Kom          | Mohammad Robihul Mufid, M.Tr.Kom 
+3  | 15.00-15.30 | 11 April 2025 | 3122510406  | Denny Mahendra Satria Putra         | SISTEM INFORMASI INVENTORY DAN PENJUALAN UMKM STUDI KASUS TOKO PAK DEDI | Mohammad Robihul Mufid, M.Tr.Kom   | Mohammad Robihul Mufid, M.Tr.Kom  | Fitrah Maharani Humaira, M.Kom    | Dian Septiani Santoso, M.Kom.    | Khoironi, S.Kom., M.Kom 
+
+tolong analisa terlebih dahulu dan rencanakan yang terbaik agar hasilnya lebih jelas dan tepat.
