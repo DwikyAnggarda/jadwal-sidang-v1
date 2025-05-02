@@ -65,11 +65,11 @@ app.get('/mahasiswa', async (req, res) => {
 
 // Endpoint untuk menambahkan dosen
 app.post('/dosen', async (req, res) => {
-    const { nama, departemen } = req.body;
+    const { nama, departemen, no_hp } = req.body;
     try {
         const result = await pool.query(
-            'INSERT INTO dosen (nama, departemen) VALUES ($1, $2) RETURNING *',
-            [nama, departemen]
+            'INSERT INTO dosen (nama, departemen, no_hp) VALUES ($1, $2, $3) RETURNING *',
+            [nama, departemen, no_hp]
         );
         res.json(result.rows[0]);
     } catch (err) {
@@ -253,12 +253,14 @@ app.get('/sidang', async (req, res) => {
     try {
         let query = `
             SELECT s.id, s.mahasiswa_id, m.nama as mahasiswa_nama, m.departemen as mahasiswa_departemen,
-                   s.pembimbing_1_id, d1.nama as pembimbing_1_nama,
-                   s.pembimbing_2_id, d2.nama as pembimbing_2_nama,
-                   s.penguji_1_id, d3.nama as penguji_1_nama,
-                   s.penguji_2_id, d4.nama as penguji_2_nama,
-                   s.moderator_id, d5.nama as moderator_nama,
-                   s.room, TO_CHAR(s.tanggal_sidang, 'YYYY-MM-DD') as tanggal_sidang, s.jam_mulai_sidang, s.durasi_sidang
+               s.pembimbing_1_id, d1.nama as pembimbing_1_nama,
+               s.pembimbing_2_id, d2.nama as pembimbing_2_nama,
+               s.penguji_1_id, d3.nama as penguji_1_nama,
+               s.penguji_2_id, d4.nama as penguji_2_nama,
+               s.moderator_id, d5.nama as moderator_nama,
+               s.room, TO_CHAR(s.tanggal_sidang, 'YYYY-MM-DD') as tanggal_sidang, s.jam_mulai_sidang, s.durasi_sidang,
+               TO_CHAR(s.jam_mulai_final, 'HH24:MI') as jam_mulai_final,
+               TO_CHAR(s.jam_selesai_final, 'HH24:MI') as jam_selesai_final
             FROM sidang s
             JOIN mahasiswa m ON s.mahasiswa_id = m.id
             JOIN dosen d1 ON s.pembimbing_1_id = d1.id
@@ -377,6 +379,26 @@ app.post('/sidang/batch-assign', upload.single('file'), async (req, res) => {
             await client.query('BEGIN');
             let output = [];
             let no = 1;
+
+            // Cek duplikasi sebelum insert
+            // Ambil semua kombinasi mahasiswa_id dan tanggal_sidang yang akan di-insert
+            const mahasiswaIds = sidangMahasiswa.map(m => m.mahasiswa_id);
+            const checkQuery = `
+                SELECT mahasiswa_id, tanggal_sidang 
+                FROM sidang 
+                WHERE mahasiswa_id = ANY($1) AND tanggal_sidang = $2
+            `;
+            const checkResult = await client.query(checkQuery, [mahasiswaIds, tanggal_sidang]);
+            if (checkResult.rows.length > 0) {
+                // Ambil nama mahasiswa dari sidangMahasiswa
+                const dupeNames = checkResult.rows.map(r => {
+                    const found = sidangMahasiswa.find(m => m.mahasiswa_id === r.mahasiswa_id);
+                    return found ? found.nama : r.mahasiswa_id;
+                }).join(', ');
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, message: `Sidang untuk mahasiswa berikut pada tanggal ${tanggal_sidang} sudah ada: ${dupeNames}` });
+            }
+
             for (let roomIdx = 0; roomIdx < rooms.length; roomIdx++) {
                 const group = rooms[roomIdx];
                 let jamMulai = jam_mulai_sidang;

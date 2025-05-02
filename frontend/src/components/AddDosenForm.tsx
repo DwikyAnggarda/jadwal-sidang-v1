@@ -9,6 +9,7 @@ import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 interface FormValues {
   nama: string;
   departemen: string;
+  no_hp: string;
 }
 
 const AddDosenForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
@@ -20,6 +21,7 @@ const AddDosenForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
     defaultValues: {
       nama: '',
       departemen: '',
+      no_hp: '',
     },
   });
 
@@ -64,6 +66,19 @@ const AddDosenForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
           render={({ field }) => (
             <FormItem>
               <FormLabel>Departemen</FormLabel>
+              <FormControl>
+                <Input type="text" {...field} required />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+        <FormField
+          control={form.control}
+          name="no_hp"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>No. HP</FormLabel>
               <FormControl>
                 <Input type="text" {...field} required />
               </FormControl>

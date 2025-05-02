@@ -10,6 +10,7 @@ interface Dosen {
   id: number;
   nama: string;
   departemen: string;
+  no_hp: string;
 }
 
 const DosenList: React.FC = () => {
@@ -42,7 +43,7 @@ const DosenList: React.FC = () => {
   return (
     <Card className="max-w-2xl mx-auto mt-8 p-6 shadow-lg">
       <div className="flex justify-between items-center mb-6">
-        <h2 className="text-xl font-bold text-center w-full">Daftar Dosen</h2>
+        {/* <h2 className="text-xl font-bold text-center w-full">Daftar Dosen</h2> */}
         <Dialog open={isDialogOpen} onOpenChange={(open) => {
           setIsDialogOpen(open);
           if (!open) fetchDosen();
@@ -63,6 +64,7 @@ const DosenList: React.FC = () => {
           <thead className="bg-neutral-100">
             <tr>
               <th className="border px-3 py-2">Nama</th>
+              <th className="border px-3 py-2">No. HP</th>
               <th className="border px-3 py-2">Departemen</th>
               <th className="border px-3 py-2">Bimbingan Saat Ini</th>
               <th className="border px-3 py-2">Maksimal Bimbingan</th>
@@ -72,6 +74,7 @@ const DosenList: React.FC = () => {
             {data.map((d) => (
               <tr key={d.id} className="hover:bg-neutral-50 transition">
                 <td className="border px-3 py-2 font-medium">{d.nama}</td>
+                <td className="border px-3 py-2">{d.no_hp}</td>
                 <td className="border px-3 py-2">{d.departemen}</td>
                 <td className="border px-3 py-2">{(d as any).bimbingan_saat_ini ?? '-'}</td>
                 <td className="border px-3 py-2">{(d as any).maksimal_bimbingan ?? '-'}</td>

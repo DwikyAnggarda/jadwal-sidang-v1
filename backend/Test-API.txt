@@ -1,0 +1,5 @@
+curl -X POST http://localhost:5000/sidang/batch-assign \
+  -F "tanggal_sidang=2025-05-01" \
+  -F "jam_mulai_sidang=09:00" \
+  -F "durasi_sidang=30" \
+  -F "file=@/var/www/html/import-data-1.xlsx"
