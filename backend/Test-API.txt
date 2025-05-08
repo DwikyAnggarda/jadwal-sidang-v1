@@ -3,3 +3,21 @@ curl -X POST http://localhost:5000/sidang/batch-assign \
   -F "jam_mulai_sidang=09:00" \
   -F "durasi_sidang=30" \
   -F "file=@/var/www/html/import-data-1.xlsx"
+  
+  
+ Berikut adalah versi yang lebih rapi dan mudah dibaca dari catatanmu:
+
+---
+
+## Catatan
+
+### Dokumentasi
+- Buat dokumentasi mengenai aturan-aturan di PA.
+- Konfigurasi cron tab untuk notifikasi WhatsApp ke dosen bersangkutan sesuai jadwal sidang.
+
+### Eksperimen
+- Tambahkan unit testing dan usability testing.
+- Gunakan data real dari dosen dan mahasiswa untuk testing.
+
+### Pengecekan
+- Tinjau ulang rules penjadwalan sidang.

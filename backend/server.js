@@ -6,6 +6,7 @@ const xlsx = require('xlsx');
 const upload = multer({ dest: 'uploads/' });
 const fs = require('fs');
 const path = require('path');
+const axios = require('axios');
 
 const app = express();
 app.use(cors());
@@ -330,6 +331,7 @@ app.post('/sidang/batch-assign', upload.single('file'), async (req, res) => {
         const sidangMahasiswa = [];
         for (const row of mahasiswaList) {
             const [nrp, nama, judul, dosen1, dosen2] = row;
+            // Revisi: dosen2 juga wajib
             if (!nrp || !nama || !judul || !dosen1 || !dosen2) {
                 return res.status(400).json({ success: false, message: `Data tidak lengkap pada NRP ${nrp}` });
             }
@@ -339,8 +341,11 @@ app.post('/sidang/batch-assign', upload.single('file'), async (req, res) => {
             }
             const d1 = dosenMap[dosen1.trim().toLowerCase()];
             const d2 = dosenMap[dosen2.trim().toLowerCase()];
-            if (!d1 || !d2) {
-                return res.status(400).json({ success: false, message: `Dosen pembimbing tidak ditemukan untuk NRP ${nrp}` });
+            if (!d1) {
+                return res.status(400).json({ success: false, message: `Dosen pembimbing 1 tidak ditemukan untuk NRP ${nrp}` });
+            }
+            if (!d2) {
+                return res.status(400).json({ success: false, message: `Dosen pembimbing 2 tidak ditemukan untuk NRP ${nrp}` });
             }
             sidangMahasiswa.push({
                 nrp, nama, judul,
@@ -489,16 +494,239 @@ app.post('/sidang/batch-assign', upload.single('file'), async (req, res) => {
     }
 });
 
-// Endpoint untuk mendapatkan daftar ruangan
-/* app.get('/rooms', async (req, res) => {
-    try {
-        const result = await pool.query('SELECT * FROM room');
-        res.json(result.rows);
-    } catch (err) {
-        console.error(err);
-        res.status(500).send('Server error');
+// Endpoint untuk penjadwalan moderator sidang otomatis (OLD - replaced by /sidang/moderator/assign)
+app.post('/moderator/assign', upload.single('file'), async (req, res) => {
+    const { tanggal_sidang, jam_awal, jam_akhir, durasi_sidang } = req.body;
+    if (!tanggal_sidang || !jam_awal || !jam_akhir || !durasi_sidang || !req.file) {
+        return res.status(400).json({ success: false, message: 'Field tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, dan file diperlukan' });
     }
-}); */
+
+    // Parse Excel
+    let mahasiswaList;
+    try {
+        const workbook = xlsx.readFile(req.file.path);
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        mahasiswaList = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        mahasiswaList = mahasiswaList.slice(1).filter(row => row[0]);
+    } catch (err) {
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({ success: false, message: 'File excel tidak valid' });
+    }
+    fs.unlinkSync(req.file.path);
+
+    // Format: [NRP, Nama Mahasiswa, Judul, Nama Dosen Pembimbing 1, Nama Dosen Pembimbing 2]
+    try {
+        // Ambil semua dosen
+        const dosenResult = await pool.query('SELECT id, nama FROM dosen');
+        const dosenMap = {};
+        dosenResult.rows.forEach(d => { dosenMap[d.nama.trim().toLowerCase()] = d; });
+
+        // Ambil semua mahasiswa
+        const mahasiswaResult = await pool.query('SELECT id, nrp, nama FROM mahasiswa');
+        const mahasiswaMap = {};
+        mahasiswaResult.rows.forEach(m => { mahasiswaMap[m.nrp] = m; });
+
+        // Siapkan data mahasiswa sidang
+        const sidangMahasiswa = [];
+        for (const row of mahasiswaList) {
+            const [nrp, nama, judul, dosen1, dosen2] = row;
+            // Revisi: dosen2 juga wajib
+            if (!nrp || !nama || !judul || !dosen1 || !dosen2) {
+                return res.status(400).json({ success: false, message: `Data tidak lengkap pada NRP ${nrp}` });
+            }
+            const mhs = mahasiswaResult.rows.find(m => m.nrp == nrp);
+            if (!mhs) {
+                return res.status(400).json({ success: false, message: `Mahasiswa dengan NRP ${nrp} tidak ditemukan di database` });
+            }
+            const d1 = dosenMap[dosen1.trim().toLowerCase()];
+            const d2 = dosenMap[dosen2.trim().toLowerCase()];
+            if (!d1) {
+                return res.status(400).json({ success: false, message: `Dosen pembimbing 1 tidak ditemukan untuk NRP ${nrp}` });
+            }
+            if (!d2) {
+                return res.status(400).json({ success: false, message: `Dosen pembimbing 2 tidak ditemukan untuk NRP ${nrp}` });
+            }
+            sidangMahasiswa.push({
+                nrp, nama, judul,
+                mahasiswa_id: mhs.id,
+                pembimbing_1_id: d1.id,
+                pembimbing_2_id: d2.id,
+                pembimbing_1_nama: d1.nama,
+                pembimbing_2_nama: d2.nama
+            });
+        }
+
+        // Hitung sesi
+        function timeToMinutes(t) {
+            const [h, m] = t.split(':').map(Number);
+            return h * 60 + m;
+        }
+        function minutesToTime(m) {
+            const h = Math.floor(m / 60);
+            const min = m % 60;
+            return h.toString().padStart(2, '0') + ':' + min.toString().padStart(2, '0');
+        }
+        const startMinutes = timeToMinutes(jam_awal);
+        const endMinutes = timeToMinutes(jam_akhir);
+        const durasi = parseInt(durasi_sidang, 10);
+        if (isNaN(durasi) || durasi <= 0) {
+            return res.status(400).json({ success: false, message: 'Durasi sidang tidak valid.' });
+        }
+        if (startMinutes >= endMinutes) {
+            return res.status(400).json({ success: false, message: 'Jam akhir harus setelah jam awal.' });
+        }
+        const totalSesi = Math.floor((endMinutes - startMinutes) / durasi);
+        // const totalSesi = 2;
+        console.log('Total sesi:', totalSesi);
+        if (totalSesi <= 0) {
+            return res.status(400).json({ success: false, message: 'Rentang waktu tidak cukup untuk satu sesi sidang.' });
+        }
+
+        // 1. Kelompokkan mahasiswa berdasarkan nama pembimbing 1 (urut sesuai Excel)
+        const kelompokMap = {};
+        sidangMahasiswa.forEach(m => {
+            const key = m.pembimbing_1_nama;
+            if (!kelompokMap[key]) kelompokMap[key] = [];
+            kelompokMap[key].push(m);
+        });
+        // Urutkan kelompok sesuai urutan kemunculan di Excel
+        const kelompokOrder = [];
+        sidangMahasiswa.forEach(m => {
+            if (!kelompokOrder.includes(m.pembimbing_1_nama)) kelompokOrder.push(m.pembimbing_1_nama);
+        });
+
+        // 2. Buat ruangan: satu ruangan diisi mahasiswa dengan moderator (pembimbing 1) yang sama, maksimal totalSesi per ruangan
+        let rooms = [];
+        let roomNo = 1;
+        kelompokOrder.forEach(nama => {
+            const group = kelompokMap[nama];
+            let idx = 0;
+            while (idx < group.length) {
+                const chunk = group.slice(idx, idx + totalSesi);
+                rooms.push({
+                    room: roomNo++,
+                    mahasiswa: chunk
+                });
+                idx += totalSesi;
+            }
+        });
+
+        // Gabungkan ruangan-ruangan yang hanya berisi satu mahasiswa saja
+        let singleRooms = [];
+        let otherRooms = [];
+        for (const r of rooms) {
+            if (r.mahasiswa.length === 1) {
+                singleRooms.push(r);
+            } else {
+                otherRooms.push(r);
+            }
+        }
+        if (singleRooms.length > 1) {
+            const nrpOrder = sidangMahasiswa.map(m => m.nrp);
+            singleRooms.sort((a, b) => nrpOrder.indexOf(a.mahasiswa[0].nrp) - nrpOrder.indexOf(b.mahasiswa[0].nrp));
+            const allSingleMahasiswa = singleRooms.map(r => r.mahasiswa[0]);
+            let idx = 0;
+            let mergedRooms = [];
+            while (idx < allSingleMahasiswa.length) {
+                let remaining = allSingleMahasiswa.length - idx;
+                let size = Math.min(totalSesi, remaining);
+                if (remaining === 1 && mergedRooms.length > 0) {
+                    size = 1;
+                } else if (size < 2 && remaining > 1) {
+                    size = 2;
+                }
+                const chunk = allSingleMahasiswa.slice(idx, idx + size);
+                mergedRooms.push({
+                    mahasiswa: chunk
+                });
+                idx += size;
+            }
+            rooms = otherRooms.concat(mergedRooms);
+        } else {
+            rooms = otherRooms.concat(singleRooms);
+        }
+
+        // Penomoran ulang room secara berurutan
+        rooms.forEach((r, idx) => {
+            r.room = idx + 1;
+        });
+
+        // --- Penjadwalan moderator: satu dosen hanya boleh menjadi moderator di satu ruangan dan maksimal totalSesi sesi ---
+        // Tracking: moderatorRoomMap (namaDosen -> room), moderatorSesiMap (namaDosen -> jumlahSesi)
+        const moderatorRoomMap = {};
+        const moderatorSesiMap = {};
+
+        // Daftar semua dosen (nama)
+        const allDosenNama = dosenResult.rows.map(d => d.nama);
+
+        // Assign moderator untuk setiap ruangan
+        for (let i = 0; i < rooms.length; i++) {
+            const r = rooms[i];
+            // Calon moderator: pembimbing 1 semua mahasiswa di ruangan
+            const calonPembimbing1 = r.mahasiswa.map(m => m.pembimbing_1_nama);
+            // Calon moderator: pembimbing 2 semua mahasiswa di ruangan
+            const calonPembimbing2 = r.mahasiswa.map(m => m.pembimbing_2_nama);
+
+            // Urutan prioritas: pembimbing 1, pembimbing 2, dosen lain
+            let kandidat = [];
+            // Unik dan urut
+            calonPembimbing1.forEach(nama => { if (!kandidat.includes(nama)) kandidat.push(nama); });
+            calonPembimbing2.forEach(nama => { if (!kandidat.includes(nama)) kandidat.push(nama); });
+            allDosenNama.forEach(nama => { if (!kandidat.includes(nama)) kandidat.push(nama); });
+
+            let found = false;
+            for (const nama of kandidat) {
+                // Belum pernah jadi moderator di ruangan lain dan belum melebihi totalSesi
+                if (
+                    moderatorRoomMap[nama] === undefined &&
+                    (moderatorSesiMap[nama] === undefined || moderatorSesiMap[nama] + r.mahasiswa.length <= totalSesi)
+                ) {
+                    r.moderator = nama;
+                    moderatorRoomMap[nama] = r.room;
+                    moderatorSesiMap[nama] = (moderatorSesiMap[nama] || 0) + r.mahasiswa.length;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                return res.status(400).json({ success: false, message: `Tidak ada dosen yang bisa menjadi moderator di room ${r.room}. Semua dosen sudah mencapai batas.` });
+            }
+        }
+
+        // Output final
+        let output = [];
+        let no = 1;
+        for (const r of rooms) {
+            for (let sesiIdx = 0; sesiIdx < r.mahasiswa.length; sesiIdx++) {
+                const m = r.mahasiswa[sesiIdx];
+                const jam_mulai = minutesToTime(startMinutes + sesiIdx * durasi);
+                const jam_selesai = minutesToTime(startMinutes + (sesiIdx + 1) * durasi);
+                output.push({
+                    no: no++,
+                    tanggal_sidang,
+                    jam_mulai,
+                    jam_selesai,
+                    room: r.room,
+                    nrp: m.nrp,
+                    nama_mahasiswa: m.nama,
+                    judul: m.judul,
+                    moderator: r.moderator,
+                    pembimbing_1: m.pembimbing_1_nama,
+                    pembimbing_2: m.pembimbing_2_nama
+                });
+            }
+        }
+
+        return res.json({ success: true, data: output });
+    } catch (err) {
+        console.error("Error in /sidang/moderator/assign:", err);
+        if (filePath) {
+            try { fs.unlinkSync(filePath); } catch (e) { }
+        }
+        return res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+    }
+});
 
 app.listen(5000, () => {
     console.log('Server berjalan di port 5000');
