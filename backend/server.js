@@ -576,8 +576,8 @@ app.post('/moderator/assign', upload.single('file'), async (req, res) => {
         if (startMinutes >= endMinutes) {
             return res.status(400).json({ success: false, message: 'Jam akhir harus setelah jam awal.' });
         }
-        const totalSesi = Math.floor((endMinutes - startMinutes) / durasi);
-        // const totalSesi = 2;
+        // const totalSesi = Math.floor((endMinutes - startMinutes) / durasi);
+        const totalSesi = 3;
         console.log('Total sesi:', totalSesi);
         if (totalSesi <= 0) {
             return res.status(400).json({ success: false, message: 'Rentang waktu tidak cukup untuk satu sesi sidang.' });
