@@ -497,8 +497,30 @@ app.post('/sidang/batch-assign', upload.single('file'), async (req, res) => {
 // Endpoint untuk penjadwalan moderator sidang otomatis (OLD - replaced by /sidang/moderator/assign)
 app.post('/moderator/assign', upload.single('file'), async (req, res) => {
     const { tanggal_sidang, jam_awal, jam_akhir, durasi_sidang } = req.body;
+
+    // Validasi field wajib
     if (!tanggal_sidang || !jam_awal || !jam_akhir || !durasi_sidang || !req.file) {
         return res.status(400).json({ success: false, message: 'Field tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, dan file diperlukan' });
+    }
+
+    // Validasi file harus Excel
+    if (!req.file.originalname.match(/\.(xlsx|xls)$/i)) {
+        return res.status(400).json({ success: false, message: 'File harus berupa Excel (.xlsx/.xls)' });
+    }
+
+    // Validasi durasi_sidang harus angka positif
+    const durasi = parseInt(durasi_sidang, 10);
+    if (isNaN(durasi) || durasi <= 0) {
+        return res.status(400).json({ success: false, message: 'Durasi sidang harus angka positif' });
+    }
+
+    // Validasi jam_awal < jam_akhir
+    const [jamAwal, menitAwal] = jam_awal.split(':').map(Number);
+    const [jamAkhir, menitAkhir] = jam_akhir.split(':').map(Number);
+    const totalAwal = jamAwal * 60 + menitAwal;
+    const totalAkhir = jamAkhir * 60 + menitAkhir;
+    if (totalAkhir <= totalAwal) {
+        return res.status(400).json({ success: false, message: 'jam_akhir harus setelah jam_awal' });
     }
 
     // Parse Excel
@@ -515,7 +537,6 @@ app.post('/moderator/assign', upload.single('file'), async (req, res) => {
     }
     fs.unlinkSync(req.file.path);
 
-    // Format: [NRP, Nama Mahasiswa, Judul, Nama Dosen Pembimbing 1, Nama Dosen Pembimbing 2]
     try {
         // Ambil semua dosen
         const dosenResult = await pool.query('SELECT id, nama FROM dosen');
@@ -567,9 +588,9 @@ app.post('/moderator/assign', upload.single('file'), async (req, res) => {
             const min = m % 60;
             return h.toString().padStart(2, '0') + ':' + min.toString().padStart(2, '0');
         }
-        const startMinutes = timeToMinutes(jam_awal);
-        const endMinutes = timeToMinutes(jam_akhir);
-        const durasi = parseInt(durasi_sidang, 10);
+        let startMinutes = timeToMinutes(jam_awal);
+        let endMinutes = timeToMinutes(jam_akhir);
+        let durasi = parseInt(durasi_sidang, 10);
         if (isNaN(durasi) || durasi <= 0) {
             return res.status(400).json({ success: false, message: 'Durasi sidang tidak valid.' });
         }
@@ -583,151 +604,150 @@ app.post('/moderator/assign', upload.single('file'), async (req, res) => {
             return res.status(400).json({ success: false, message: 'Rentang waktu tidak cukup untuk satu sesi sidang.' });
         }
 
-        // 1. Kelompokkan mahasiswa berdasarkan nama pembimbing 1 (urut sesuai Excel)
-        const kelompokMap = {};
-        sidangMahasiswa.forEach(m => {
-            const key = m.pembimbing_1_nama;
-            if (!kelompokMap[key]) kelompokMap[key] = [];
-            kelompokMap[key].push(m);
-        });
-        // Urutkan kelompok sesuai urutan kemunculan di Excel
-        const kelompokOrder = [];
-        sidangMahasiswa.forEach(m => {
-            if (!kelompokOrder.includes(m.pembimbing_1_nama)) kelompokOrder.push(m.pembimbing_1_nama);
-        });
-
-        // 2. Buat ruangan: satu ruangan diisi mahasiswa dengan moderator (pembimbing 1) yang sama, maksimal totalSesi per ruangan
-        let rooms = [];
-        let roomNo = 1;
-        kelompokOrder.forEach(nama => {
-            const group = kelompokMap[nama];
-            let idx = 0;
-            while (idx < group.length) {
-                const chunk = group.slice(idx, idx + totalSesi);
-                rooms.push({
-                    room: roomNo++,
-                    mahasiswa: chunk
-                });
-                idx += totalSesi;
-            }
-        });
-
-        // Gabungkan ruangan-ruangan yang hanya berisi satu mahasiswa saja
-        let singleRooms = [];
-        let otherRooms = [];
-        for (const r of rooms) {
-            if (r.mahasiswa.length === 1) {
-                singleRooms.push(r);
-            } else {
-                otherRooms.push(r);
-            }
-        }
-        if (singleRooms.length > 1) {
-            const nrpOrder = sidangMahasiswa.map(m => m.nrp);
-            singleRooms.sort((a, b) => nrpOrder.indexOf(a.mahasiswa[0].nrp) - nrpOrder.indexOf(b.mahasiswa[0].nrp));
-            const allSingleMahasiswa = singleRooms.map(r => r.mahasiswa[0]);
-            let idx = 0;
-            let mergedRooms = [];
-            while (idx < allSingleMahasiswa.length) {
-                let remaining = allSingleMahasiswa.length - idx;
-                let size = Math.min(totalSesi, remaining);
-                if (remaining === 1 && mergedRooms.length > 0) {
-                    size = 1;
-                } else if (size < 2 && remaining > 1) {
-                    size = 2;
-                }
-                const chunk = allSingleMahasiswa.slice(idx, idx + size);
-                mergedRooms.push({
-                    mahasiswa: chunk
-                });
-                idx += size;
-            }
-            rooms = otherRooms.concat(mergedRooms);
-        } else {
-            rooms = otherRooms.concat(singleRooms);
-        }
-
-        // Penomoran ulang room secara berurutan
-        rooms.forEach((r, idx) => {
-            r.room = idx + 1;
-        });
-
-        // --- Penjadwalan moderator: satu dosen hanya boleh menjadi moderator di satu ruangan dan maksimal totalSesi sesi ---
-        // Tracking: moderatorRoomMap (namaDosen -> room), moderatorSesiMap (namaDosen -> jumlahSesi)
-        const moderatorRoomMap = {};
-        const moderatorSesiMap = {};
-
-        // Daftar semua dosen (nama)
-        const allDosenNama = dosenResult.rows.map(d => d.nama);
-
-        // Assign moderator untuk setiap ruangan
-        for (let i = 0; i < rooms.length; i++) {
-            const r = rooms[i];
-            // Calon moderator: pembimbing 1 semua mahasiswa di ruangan
-            const calonPembimbing1 = r.mahasiswa.map(m => m.pembimbing_1_nama);
-            // Calon moderator: pembimbing 2 semua mahasiswa di ruangan
-            const calonPembimbing2 = r.mahasiswa.map(m => m.pembimbing_2_nama);
-
-            // Urutan prioritas: pembimbing 1, pembimbing 2, dosen lain
-            let kandidat = [];
-            // Unik dan urut
-            calonPembimbing1.forEach(nama => { if (!kandidat.includes(nama)) kandidat.push(nama); });
-            calonPembimbing2.forEach(nama => { if (!kandidat.includes(nama)) kandidat.push(nama); });
-            allDosenNama.forEach(nama => { if (!kandidat.includes(nama)) kandidat.push(nama); });
-
-            let found = false;
-            for (const nama of kandidat) {
-                // Belum pernah jadi moderator di ruangan lain dan belum melebihi totalSesi
-                if (
-                    moderatorRoomMap[nama] === undefined &&
-                    (moderatorSesiMap[nama] === undefined || moderatorSesiMap[nama] + r.mahasiswa.length <= totalSesi)
-                ) {
-                    r.moderator = nama;
-                    moderatorRoomMap[nama] = r.room;
-                    moderatorSesiMap[nama] = (moderatorSesiMap[nama] || 0) + r.mahasiswa.length;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                return res.status(400).json({ success: false, message: `Tidak ada dosen yang bisa menjadi moderator di room ${r.room}. Semua dosen sudah mencapai batas.` });
-            }
-        }
-
-        // Output final
+        // Penjadwalan moderator sesuai algoritma revisi
+        // Tracking jumlah sesi moderator per dosen per hari
+        const moderatorSesiMap = {}; // key: dosen_nama, value: jumlah sesi
         let output = [];
         let no = 1;
-        for (const r of rooms) {
-            for (let sesiIdx = 0; sesiIdx < r.mahasiswa.length; sesiIdx++) {
-                const m = r.mahasiswa[sesiIdx];
+
+        // Step 1: Tentukan moderator untuk setiap mahasiswa
+        let mahasiswaWithModerator = sidangMahasiswa.map((m, idx) => {
+            const pembimbing1Nama = m.pembimbing_1_nama;
+            const pembimbing2Nama = m.pembimbing_2_nama;
+            if (!moderatorSesiMap[pembimbing1Nama]) moderatorSesiMap[pembimbing1Nama] = 0;
+            if (!moderatorSesiMap[pembimbing2Nama]) moderatorSesiMap[pembimbing2Nama] = 0;
+            let moderatorNama = null;
+            if (moderatorSesiMap[pembimbing1Nama] < totalSesi) {
+                moderatorNama = pembimbing1Nama;
+                moderatorSesiMap[pembimbing1Nama]++;
+            } else if (moderatorSesiMap[pembimbing2Nama] < totalSesi) {
+                moderatorNama = pembimbing2Nama;
+                moderatorSesiMap[pembimbing2Nama]++;
+            } else {
+                throw new Error(`Tidak ada dosen yang bisa menjadi moderator untuk mahasiswa ${m.nama} (NRP ${m.nrp}). Pembimbing 1 & 2 sudah mencapai batas sesi.`);
+            }
+            return {
+                ...m,
+                moderator: moderatorNama,
+                idx // simpan urutan awal untuk penjadwalan jam
+            };
+        });
+
+        // Step 2: Group mahasiswa berdasarkan moderator
+        const moderatorGroups = {};
+        mahasiswaWithModerator.forEach(m => {
+            if (!moderatorGroups[m.moderator]) moderatorGroups[m.moderator] = [];
+            moderatorGroups[m.moderator].push(m);
+        });
+
+        // Step 3: Buat output dengan penomoran room urut dan penjadwalan jam sesuai urutan awal
+        let roomNo = 1;
+        let sesiIdx = 0;
+        let finalOutput = [];
+        Object.keys(moderatorGroups).forEach(moderatorNama => {
+            const group = moderatorGroups[moderatorNama];
+            group.forEach(m => {
                 const jam_mulai = minutesToTime(startMinutes + sesiIdx * durasi);
                 const jam_selesai = minutesToTime(startMinutes + (sesiIdx + 1) * durasi);
-                output.push({
+                finalOutput.push({
                     no: no++,
                     tanggal_sidang,
                     jam_mulai,
                     jam_selesai,
-                    room: r.room,
+                    room: roomNo,
                     nrp: m.nrp,
                     nama_mahasiswa: m.nama,
                     judul: m.judul,
-                    moderator: r.moderator,
+                    moderator: m.moderator,
                     pembimbing_1: m.pembimbing_1_nama,
                     pembimbing_2: m.pembimbing_2_nama
                 });
+                sesiIdx++;
+            });
+            roomNo++;
+        });
+
+        // --- Mulai regrouping kelas ---
+        // Aturan: totalSesi per kelas, gabungkan room yang < totalSesi sesuai instruksi user
+
+        function timeToMinutesAgain(t) {
+            const [h, m] = t.split(':').map(Number);
+            return h * 60 + m;
+        }
+        function minutesToTimeAgain(m) {
+            const h = Math.floor(m / 60);
+            const min = m % 60;
+            return h.toString().padStart(2, '0') + ':' + min.toString().padStart(2, '0');
+        }
+        startMinutes = timeToMinutesAgain(jam_awal);
+        durasi = parseInt(durasi_sidang, 10);
+
+        // Step 1: Group by room
+        const roomMap = {};
+        // finalOutput sudah berisi: no, tanggal_sidang, jam_mulai, jam_selesai, room, nrp, nama_mahasiswa, judul, moderator, pembimbing_1, pembimbing_2
+        finalOutput.forEach(m => {
+            if (!roomMap[m.room]) roomMap[m.room] = [];
+            roomMap[m.room].push(m);
+        });
+
+        // Step 2: Pisahkan room yang sudah totalSesi dan yang kurang
+        let kelasUtuh = [];
+        let sisaMahasiswa = [];
+        Object.values(roomMap).forEach(arr => {
+            if (arr.length === totalSesi) {
+                kelasUtuh.push(arr);
+            } else {
+                sisaMahasiswa = sisaMahasiswa.concat(arr);
+            }
+        });
+
+        // Step 3: Gabungkan sisa mahasiswa menjadi kelas baru, max totalSesi per kelas
+        let kelasGabungan = [];
+        let temp = [];
+        for (let i = 0; i < sisaMahasiswa.length; i++) {
+            temp.push(sisaMahasiswa[i]);
+            if (temp.length === totalSesi) {
+                kelasGabungan.push(temp);
+                temp = [];
             }
         }
+        if (temp.length > 0) {
+            kelasGabungan.push(temp); // kelas terakhir bisa < totalSesi
+        }
 
-        return res.json({ success: true, data: output });
+        // Step 4: Gabungkan semua kelas dan beri nomor urut kelas
+        let semuaKelas = [...kelasUtuh, ...kelasGabungan];
+        let hasilAkhir = [];
+        let kelasNo = 1;
+        let sesiGlobal = 0;
+        for (let kelas of semuaKelas) {
+            for (let idx = 0; idx < kelas.length; idx++) {
+                const m = kelas[idx];
+                const jamMulai = minutesToTimeAgain(startMinutes + sesiGlobal * durasi);
+                const jamSelesai = minutesToTimeAgain(startMinutes + (sesiGlobal + 1) * durasi);
+                hasilAkhir.push({
+                    ...m,
+                    kelas: kelasNo,
+                    jam_mulai: jamMulai,
+                    jam_selesai: jamSelesai
+                });
+                sesiGlobal++;
+            }
+            kelasNo++;
+        }
+
+        // Step 5: Penomoran ulang field no
+        hasilAkhir = hasilAkhir.map((m, idx) => ({ ...m, no: idx + 1 }));
+
+        return res.json({ success: true, data: hasilAkhir });
     } catch (err) {
         console.error("Error in /sidang/moderator/assign:", err);
-        if (filePath) {
-            try { fs.unlinkSync(filePath); } catch (e) { }
-        }
         return res.status(500).json({ success: false, message: 'Server error: ' + err.message });
     }
 });
 
-app.listen(5000, () => {
+module.exports = app;
+
+/* app.listen(5000, () => {
     console.log('Server berjalan di port 5000');
-});
+}); */
