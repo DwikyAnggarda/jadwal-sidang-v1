@@ -4,8 +4,7 @@
     "description": "Backend for Jadwal Sidang v1 app",
     "main": "server.js",
     "scripts": {
-        "start": "node start.js",
-        "dev": "nodemon start.js",
+        "dev": "nodemon server.js",
         "test": "jest"
     },
     "dependencies": {

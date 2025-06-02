@@ -720,24 +720,136 @@ app.post('/moderator/assign', upload.single('file'), async (req, res) => {
         let hasilAkhir = [];
         let kelasNo = 1;
         let sesiGlobal = 0;
+
+        // Ambil seluruh nama dosen
+        const allDosenNama = dosenResult.rows.map(d => d.nama);
+
+        // Set global untuk tracking dosen penguji yang sudah dipakai di kelas lain
+        const globalPengujiDipakai = new Set();
+
+        // Penentuan penguji_1 dan penguji_2 per kelas (unik per kelas, tidak boleh dipakai di kelas lain)
         for (let kelas of semuaKelas) {
-            for (let idx = 0; idx < kelas.length; idx++) {
-                const m = kelas[idx];
-                const jamMulai = minutesToTimeAgain(startMinutes + sesiGlobal * durasi);
-                const jamSelesai = minutesToTimeAgain(startMinutes + (sesiGlobal + 1) * durasi);
-                hasilAkhir.push({
-                    ...m,
-                    kelas: kelasNo,
-                    jam_mulai: jamMulai,
-                    jam_selesai: jamSelesai
-                });
-                sesiGlobal++;
+            const moderatorKelas = kelas.map(m => m.moderator);
+            const pembimbingKelas = kelas.flatMap(m => [m.pembimbing_1, m.pembimbing_2]);
+            const pengujiKandidat = allDosenNama.filter(nama =>
+                !moderatorKelas.includes(nama) &&
+                !pembimbingKelas.includes(nama) &&
+                !globalPengujiDipakai.has(nama)
+            );
+            let pengujiKelas = [];
+            let warningPenguji = false;
+            const uniqueModerator = [...new Set(moderatorKelas)];
+
+            if (uniqueModerator.length > 1) {
+                // Gunakan moderator sebagai penguji (selain moderator mahasiswa itu sendiri)
+                // Namun, moderator tidak boleh menjadi penguji di mahasiswa yang sama
+                // Jika tidak cukup, ambil dari pengujiKandidat
+                for (let idx = 0; idx < kelas.length; idx++) {
+                    const m = kelas[idx];
+                    // Cari moderator lain di kelas sebagai penguji (bukan moderator mahasiswa tsb)
+                    const otherModerators = uniqueModerator.filter(nama => nama !== m.moderator);
+                    let penguji_1 = null;
+                    let penguji_2 = null;
+
+                    // Ambil dua moderator berbeda, pastikan bukan moderator mahasiswa tsb
+                    if (otherModerators.length >= 2) {
+                        penguji_1 = otherModerators[0];
+                        penguji_2 = otherModerators[1];
+                    } else if (otherModerators.length === 1) {
+                        // Hanya 2 moderator di kelas, gunakan moderator lain dan satu dari pengujiKandidat
+                        penguji_1 = otherModerators[0];
+                        // Cari penguji_2 dari pengujiKandidat yang bukan moderator tsb
+                        penguji_2 = pengujiKandidat.find(nama => nama !== penguji_1) || null;
+                        if (!penguji_2) warningPenguji = true;
+                        if (penguji_2) globalPengujiDipakai.add(penguji_2);
+                    } else {
+                        // Tidak ada moderator lain, ambil dua dari pengujiKandidat
+                        penguji_1 = pengujiKandidat[0] || null;
+                        penguji_2 = pengujiKandidat[1] || null;
+                        if (!penguji_1 || !penguji_2) warningPenguji = true;
+                        if (penguji_1) globalPengujiDipakai.add(penguji_1);
+                        if (penguji_2) globalPengujiDipakai.add(penguji_2);
+                    }
+
+                    // Jika penguji_1 atau penguji_2 sama dengan moderator mahasiswa tsb, fallback ke pengujiKandidat
+                    if (penguji_1 === m.moderator) {
+                        penguji_1 = pengujiKandidat.find(nama => nama !== m.moderator && nama !== penguji_2) || null;
+                        if (penguji_1 && !globalPengujiDipakai.has(penguji_1)) globalPengujiDipakai.add(penguji_1);
+                        if (!penguji_1) warningPenguji = true;
+                    }
+                    if (penguji_2 === m.moderator) {
+                        penguji_2 = pengujiKandidat.find(nama => nama !== m.moderator && nama !== penguji_1) || null;
+                        if (penguji_2 && !globalPengujiDipakai.has(penguji_2)) globalPengujiDipakai.add(penguji_2);
+                        if (!penguji_2) warningPenguji = true;
+                    }
+
+                    const jamMulai = minutesToTimeAgain(startMinutes + sesiGlobal * durasi);
+                    const jamSelesai = minutesToTimeAgain(startMinutes + (sesiGlobal + 1) * durasi);
+                    hasilAkhir.push({
+                        ...m,
+                        kelas: kelasNo,
+                        jam_mulai: jamMulai,
+                        jam_selesai: jamSelesai,
+                        penguji_1,
+                        penguji_2
+                    });
+                    sesiGlobal++;
+                }
+            } else {
+                // Ambil dari dosen lain (bukan moderator/pembimbing/yang sudah jadi penguji di kelas lain)
+                pengujiKelas = pengujiKandidat.slice(0, 2);
+                if (pengujiKelas.length < 2) warningPenguji = true;
+                pengujiKelas.forEach(nama => globalPengujiDipakai.add(nama));
+                for (let idx = 0; idx < kelas.length; idx++) {
+                    const m = kelas[idx];
+                    let penguji_1 = null;
+                    let penguji_2 = null;
+                    if (pengujiKelas.length === 2) {
+                        // Rotasi: ganjil/genap urutan
+                        if (idx % 2 === 0) {
+                            penguji_1 = pengujiKelas[0];
+                            penguji_2 = pengujiKelas[1];
+                        } else {
+                            penguji_1 = pengujiKelas[1];
+                            penguji_2 = pengujiKelas[0];
+                        }
+                    } else if (pengujiKelas.length === 1) {
+                        penguji_1 = pengujiKelas[0];
+                        penguji_2 = null;
+                        warningPenguji = true;
+                    } else {
+                        penguji_1 = null;
+                        penguji_2 = null;
+                        warningPenguji = true;
+                    }
+                    const jamMulai = minutesToTimeAgain(startMinutes + sesiGlobal * durasi);
+                    const jamSelesai = minutesToTimeAgain(startMinutes + (sesiGlobal + 1) * durasi);
+                    hasilAkhir.push({
+                        ...m,
+                        kelas: kelasNo,
+                        jam_mulai: jamMulai,
+                        jam_selesai: jamSelesai,
+                        penguji_1,
+                        penguji_2
+                    });
+                    sesiGlobal++;
+                }
             }
             kelasNo++;
         }
 
         // Step 5: Penomoran ulang field no
         hasilAkhir = hasilAkhir.map((m, idx) => ({ ...m, no: idx + 1 }));
+
+        // Warning jika ada kelas yang kekurangan dosen penguji
+        const adaWarning = hasilAkhir.some(m => !m.penguji_1 || !m.penguji_2);
+        if (adaWarning) {
+            return res.status(200).json({
+                success: true,
+                warning: 'Beberapa kelas kekurangan dosen penguji. Segera tambahkan dosen lagi untuk kebutuhan penentuan penguji.',
+                data: hasilAkhir
+            });
+        }
 
         return res.json({ success: true, data: hasilAkhir });
     } catch (err) {
@@ -746,8 +858,8 @@ app.post('/moderator/assign', upload.single('file'), async (req, res) => {
     }
 });
 
-module.exports = app;
+// module.exports = app;
 
-/* app.listen(5000, () => {
+app.listen(5000, () => {
     console.log('Server berjalan di port 5000');
-}); */
+});
