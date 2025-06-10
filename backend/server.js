@@ -12,6 +12,104 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// =================== RULE CRUD API ===================
+// GET all rules
+app.get('/rule', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM rule ORDER BY id ASC');
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// GET rule by id (optional, for edit form)
+app.get('/rule/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query('SELECT * FROM rule WHERE id = $1', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Rule tidak ditemukan' });
+        }
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// CREATE rule
+app.post('/rule', async (req, res) => {
+    const { jenis_sidang, durasi_sidang, jumlah_sesi } = req.body;
+    if (!jenis_sidang || !durasi_sidang || !jumlah_sesi) {
+        return res.status(400).json({ success: false, message: 'Field jenis_sidang, durasi_sidang, jumlah_sesi wajib diisi' });
+    }
+    if (isNaN(durasi_sidang) || isNaN(jumlah_sesi) || durasi_sidang <= 0 || jumlah_sesi <= 0) {
+        return res.status(400).json({ success: false, message: 'Durasi dan jumlah sesi harus angka > 0' });
+    }
+    try {
+        // Cek unik
+        const exist = await pool.query('SELECT id FROM rule WHERE LOWER(jenis_sidang) = LOWER($1)', [jenis_sidang]);
+        if (exist.rows.length > 0) {
+            return res.status(400).json({ success: false, message: 'Jenis sidang sudah ada' });
+        }
+        const result = await pool.query(
+            'INSERT INTO rule (jenis_sidang, durasi_sidang, jumlah_sesi) VALUES ($1, $2, $3) RETURNING *',
+            [jenis_sidang, durasi_sidang, jumlah_sesi]
+        );
+        res.json({ success: true, data: result.rows[0] });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// UPDATE rule
+app.put('/rule/:id', async (req, res) => {
+    const { id } = req.params;
+    const { jenis_sidang, durasi_sidang, jumlah_sesi } = req.body;
+    if (!jenis_sidang || !durasi_sidang || !jumlah_sesi) {
+        return res.status(400).json({ success: false, message: 'Field jenis_sidang, durasi_sidang, jumlah_sesi wajib diisi' });
+    }
+    if (isNaN(durasi_sidang) || isNaN(jumlah_sesi) || durasi_sidang <= 0 || jumlah_sesi <= 0) {
+        return res.status(400).json({ success: false, message: 'Durasi dan jumlah sesi harus angka > 0' });
+    }
+    try {
+        // Cek unik kecuali milik sendiri
+        const exist = await pool.query('SELECT id FROM rule WHERE LOWER(jenis_sidang) = LOWER($1) AND id != $2', [jenis_sidang, id]);
+        if (exist.rows.length > 0) {
+            return res.status(400).json({ success: false, message: 'Jenis sidang sudah ada' });
+        }
+        const result = await pool.query(
+            'UPDATE rule SET jenis_sidang = $1, durasi_sidang = $2, jumlah_sesi = $3 WHERE id = $4 RETURNING *',
+            [jenis_sidang, durasi_sidang, jumlah_sesi, id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Rule tidak ditemukan' });
+        }
+        res.json({ success: true, data: result.rows[0] });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// DELETE rule
+app.delete('/rule/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query('DELETE FROM rule WHERE id = $1 RETURNING *', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Rule tidak ditemukan' });
+        }
+        res.json({ success: true, message: 'Rule berhasil dihapus' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
 // Endpoint untuk mendapatkan daftar dosen
 app.get('/dosen', async (req, res) => {
     try {
@@ -26,10 +124,7 @@ app.get('/dosen', async (req, res) => {
 // Endpoint untuk mendapatkan daftar mahasiswa
 app.get('/mahasiswa', async (req, res) => {
     try {
-        const { without_pembimbing, with_pembimbing, without_sidang } = req.query;
-        // Act Mode
-
-        // Build base query with LEFT JOIN to dosen for pembimbing_1 and pembimbing_2
+        const { without_pembimbing, with_pembimbing, without_sidang, page = 1, limit = 10 } = req.query;
         let query = `
             SELECT m.*, 
                d1.nama AS pembimbing_1_nama, 
@@ -56,13 +151,28 @@ app.get('/mahasiswa', async (req, res) => {
         }
         query += ' ORDER BY m.nama ASC';
 
-        const result = await pool.query(query, values);
-        res.json(result.rows);
-        } catch (err) {
+        // Pagination
+        const pageNum = parseInt(page, 10) || 1;
+        const limitNum = parseInt(limit, 10) || 10;
+        const offset = (pageNum - 1) * limitNum;
+
+        // Get total count
+        let countQuery = 'SELECT COUNT(*) FROM mahasiswa m';
+        if (conditions.length > 0) {
+            countQuery += ' WHERE ' + conditions.join(' AND ');
+        }
+        const countResult = await pool.query(countQuery, values);
+        const total = parseInt(countResult.rows[0].count, 10);
+
+        // Add limit/offset
+        query += ` LIMIT $${values.length + 1} OFFSET $${values.length + 2}`;
+        const result = await pool.query(query, [...values, limitNum, offset]);
+        res.json({ data: result.rows, total });
+    } catch (err) {
         console.error(err);
         res.status(500).send('Server error');
-        }
-    });
+    }
+});
 
 // Endpoint untuk menambahkan dosen
 app.post('/dosen', async (req, res) => {

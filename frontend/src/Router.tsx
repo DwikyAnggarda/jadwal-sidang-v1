@@ -6,6 +6,8 @@ import SidangAssignPage from './pages/SidangAssignPage';
 import SidangListPage from './pages/SidangListPage';
 import App from './App';
 
+import RuleListPage from './pages/RuleListPage';
+
 const Router = () => (
   <Routes>
     <Route path="/" element={<App />}>
@@ -15,6 +17,7 @@ const Router = () => (
       <Route path="pembimbing" element={<PembimbingAssignPage />} />
       <Route path="sidang" element={<SidangAssignPage />} />
       <Route path="daftar-sidang" element={<SidangListPage />} />
+      <Route path="rule" element={<RuleListPage />} />
     </Route>
   </Routes>
 );

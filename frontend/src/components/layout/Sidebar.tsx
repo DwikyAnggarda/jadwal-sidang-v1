@@ -6,11 +6,12 @@ import { Link, useLocation } from 'react-router-dom';
 import { Menu } from 'lucide-react';
 
 const navLinks = [
+	{ to: '/rule', label: 'Rule' },
 	{ to: '/mahasiswa', label: 'Mahasiswa' },
 	{ to: '/dosen', label: 'Dosen' },
-	{ to: '/daftar-sidang', label: 'Daftar Jadwal Sidang' }, // new menu item
+	{ to: '/daftar-sidang', label: 'Daftar Jadwal Sidang' },
 	{ to: '/sidang', label: 'Assign Sidang' },
-	{ to: '/pembimbing', label: 'Assign Pembimbing' },
+	// { to: '/pembimbing', label: 'Assign Pembimbing' },
 ];
 
 const Sidebar: React.FC = () => {

@@ -100,7 +100,10 @@ const MahasiswaList: React.FC = () => {
     with_pembimbing: false,
     without_pembimbing: false,
   });
-  const [allData, setAllData] = useState<Mahasiswa[]>([]); // Store all data for client-side filtering if needed
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [total, setTotal] = useState(0);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   // Download template Excel
@@ -198,13 +201,11 @@ const MahasiswaList: React.FC = () => {
       if (filters.departemen) params.append('departemen', filters.departemen);
       if (filters.with_pembimbing) params.append('with_pembimbing', 'true');
       if (filters.without_pembimbing) params.append('without_pembimbing', 'true');
-
-      const res = await api.get<Mahasiswa[]>(`/mahasiswa?${params.toString()}`);
-      setData(res.data);
-      // If fetching all data initially for filters, store it
-      if (!filters.departemen && !filters.with_pembimbing && !filters.without_pembimbing && allData.length === 0) {
-        setAllData(res.data);
-      }
+      params.append('page', String(currentPage));
+      params.append('limit', String(itemsPerPage));
+      const res = await api.get(`/mahasiswa?${params.toString()}`);
+      setData(res.data.data);
+      setTotal(res.data.total);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -214,13 +215,13 @@ const MahasiswaList: React.FC = () => {
 
   useEffect(() => {
     fetchMahasiswa();
-  }, [filters]); // Refetch when filters change
+    // eslint-disable-next-line
+  }, [filters, currentPage, itemsPerPage]); // Refetch when filters or page/limit change
 
+  // For departemen filter, fetch from current data (could be optimized)
   const uniqueDepartemen = useMemo(() => {
-    // Get unique departemen from all data if available, otherwise from current data
-    const sourceData = allData.length > 0 ? allData : data;
-    return [...new Set(sourceData.map(m => m.departemen))];
-  }, [allData, data]);
+    return [...new Set(data.map(m => m.departemen))];
+  }, [data]);
 
   const handleFilterChange = (key: keyof Filters, value: string | boolean) => {
     setFilters(prev => ({
@@ -341,7 +342,7 @@ const MahasiswaList: React.FC = () => {
         </DialogContent>
       </Dialog>
       <div className="overflow-x-auto">
-        {loading && <div className="text-center py-4">Memuat data...</div>} {/* Show loading indicator during refetch */}
+        {loading && <div className="text-center py-4">Memuat data...</div>}
         <table className="min-w-full border bg-white dark:bg-neutral-900 rounded-lg text-sm">
           <thead className="bg-neutral-100 dark:bg-neutral-800">
             <tr>
@@ -378,6 +379,35 @@ const MahasiswaList: React.FC = () => {
             )}
           </tbody>
         </table>
+        {/* Pagination Controls */}
+        {total > itemsPerPage && (
+          <div className="flex justify-center items-center gap-2 mt-4">
+            <Button size="sm" variant="outline" onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1}>&lt;</Button>
+            {Array.from({ length: Math.ceil(total / itemsPerPage) }, (_, i) => (
+              <Button
+                key={i + 1}
+                size="sm"
+                variant={currentPage === i + 1 ? 'default' : 'outline'}
+                onClick={() => setCurrentPage(i + 1)}
+              >
+                {i + 1}
+              </Button>
+            ))}
+            <Button size="sm" variant="outline" onClick={() => setCurrentPage(p => Math.min(Math.ceil(total / itemsPerPage), p + 1))} disabled={currentPage === Math.ceil(total / itemsPerPage)}>&gt;</Button>
+            <select
+              className="ml-2 border rounded px-2 py-1 text-sm"
+              value={itemsPerPage}
+              onChange={e => {
+                setItemsPerPage(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+            >
+              {[10, 20, 50, 100].map(size => (
+                <option key={size} value={size}>{size} / halaman</option>
+              ))}
+            </select>
+          </div>
+        )}
       </div>
     </Card>
   );

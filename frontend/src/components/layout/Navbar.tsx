@@ -5,10 +5,12 @@ import { Link, useLocation } from 'react-router-dom';
 import ThemeToggle from './ThemeToggle';
 
 const navLinks = [
-  { to: '/sidang', label: 'Sidang' },
+  { to: '/rule', label: 'Rule' },
   { to: '/mahasiswa', label: 'Mahasiswa' },
   { to: '/dosen', label: 'Dosen' },
-  { to: '/pembimbing', label: 'Pembimbing' },
+  { to: '/sidang', label: 'Assign Sidang' },
+  { to: '/daftar-sidang', label: 'Daftar Jadwal Sidang' },
+  // { to: '/pembimbing', label: 'Pembimbing' },
 ];
 
 const Navbar: React.FC = () => {
