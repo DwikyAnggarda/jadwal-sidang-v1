@@ -8,6 +8,7 @@ import { Button } from './ui/button';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 
 interface FormValues {
+  nrp: string;
   nama: string;
   departemen: string;
 }
@@ -19,6 +20,7 @@ const AddMahasiswaForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =>
 
   const form = useForm<FormValues>({
     defaultValues: {
+      nrp: '',
       nama: '',
       departemen: '',
     },
@@ -29,12 +31,20 @@ const AddMahasiswaForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =>
     setError(null);
     setSuccess(false);
     try {
-      await api.post('/mahasiswa', values);
-      setSuccess(true);
-      form.reset();
-      onSuccess();
+      const res = await api.post('/mahasiswa', values);
+      if (res.data && res.data.success) {
+        setSuccess(true);
+        form.reset();
+        onSuccess();
+      } else {
+        setError(res.data.message || 'Gagal menambah mahasiswa');
+      }
     } catch (err: any) {
-      setError(err.response?.data || err.message);
+      if (err.response && err.response.data && err.response.data.message) {
+        setError(err.response.data.message);
+      } else {
+        setError('Gagal menambah mahasiswa');
+      }
     } finally {
       setLoading(false);
     }
@@ -45,6 +55,20 @@ const AddMahasiswaForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =>
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
           <h3 className="font-semibold text-lg mb-4 text-center">Tambah Mahasiswa</h3>
+          <FormField
+            control={form.control}
+            name="nrp"
+            rules={{ required: 'NRP wajib diisi' }}
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>NRP</FormLabel>
+                <FormControl>
+                  <Input type="text" {...field} required />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
           <FormField
             control={form.control}
             name="nama"

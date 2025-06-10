@@ -1,4 +1,69 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
+import { Input } from './ui/input';
+// Import Mahasiswa Excel Modal
+const ImportMahasiswaDialog: React.FC<{ open: boolean; onOpenChange: (open: boolean) => void; onSuccess: () => void; }> = ({ open, onOpenChange, onSuccess }) => {
+  const [file, setFile] = useState<File | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      setFile(e.target.files[0]);
+      setError(null);
+    }
+  };
+
+  const handleImport = async () => {
+    if (!file) {
+      setError('Pilih file Excel terlebih dahulu');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.post('/mahasiswa/import', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      if (res.data && res.data.success) {
+        setSuccess(res.data.message || 'Import berhasil');
+        setFile(null);
+        if (inputRef.current) inputRef.current.value = '';
+        onSuccess();
+      } else {
+        setError(res.data.message || 'Gagal import data');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'Gagal import data');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Import Mahasiswa dari Excel</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-2">
+          <Input type="file" accept=".xlsx,.xls" onChange={handleFileChange} ref={inputRef} disabled={loading} />
+          <div className="text-xs text-neutral-500">File harus format Excel sesuai template.</div>
+          {error && <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
+          {success && <Alert variant="success"><AlertTitle>Sukses</AlertTitle><AlertDescription>{success}</AlertDescription></Alert>}
+        </div>
+        <div className="flex justify-end gap-2 mt-4">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>Batal</Button>
+          <Button onClick={handleImport} disabled={loading || !file}>{loading ? 'Mengimpor...' : 'Import'}</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+};
 import api from '../api/axios';
 import { Card } from './ui/card';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
@@ -8,9 +73,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Checkbox } from './ui/checkbox';
 import { Label } from './ui/label';
 import AddMahasiswaForm from './AddMahasiswaForm';
+import EditMahasiswaForm from './EditMahasiswaForm';
 
 interface Mahasiswa {
   id: number;
+  nrp?: string;
   nama: string;
   departemen: string;
   pembimbing_1_nama?: string | null;
@@ -34,6 +101,94 @@ const MahasiswaList: React.FC = () => {
     without_pembimbing: false,
   });
   const [allData, setAllData] = useState<Mahasiswa[]>([]); // Store all data for client-side filtering if needed
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
+  // Download template Excel
+  const handleDownloadTemplate = async () => {
+    try {
+      const res = await api.get('/mahasiswa/template', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'template_mahasiswa.xlsx');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      alert('Gagal mengunduh template');
+    }
+  };
+
+  // Export data Excel
+  const handleExport = async () => {
+    try {
+      const res = await api.get('/mahasiswa/export', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'data_mahasiswa.xlsx');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    } catch (err) {
+      alert('Gagal mengunduh data');
+    }
+  };
+  const [selectedMahasiswa, setSelectedMahasiswa] = useState<Mahasiswa | null>(null);
+  const [editSuccessMsg, setEditSuccessMsg] = useState<string | null>(null);
+  const [deleteLoadingId, setDeleteLoadingId] = useState<number | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+  const handleDeleteClick = (id: number) => {
+    setDeleteConfirmId(id);
+    setDeleteError(null);
+  };
+
+  const handleDeleteCancel = () => {
+    setDeleteConfirmId(null);
+    setDeleteError(null);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (deleteConfirmId == null) return;
+    setDeleteLoadingId(deleteConfirmId);
+    setDeleteError(null);
+    try {
+      const res = await api.delete(`/mahasiswa/${deleteConfirmId}`);
+      if (res.data && res.data.success) {
+        setEditSuccessMsg('Data mahasiswa berhasil dihapus.');
+        fetchMahasiswa();
+      } else {
+        setDeleteError(res.data.message || 'Gagal menghapus mahasiswa');
+      }
+    } catch (err: any) {
+      if (err.response && err.response.data && err.response.data.message) {
+        setDeleteError(err.response.data.message);
+      } else {
+        setDeleteError('Gagal menghapus mahasiswa');
+      }
+    } finally {
+      setDeleteLoadingId(null);
+      setDeleteConfirmId(null);
+    }
+  };
+  const handleEditClick = (mahasiswa: Mahasiswa) => {
+    setSelectedMahasiswa(mahasiswa);
+    setEditModalOpen(true);
+    setEditSuccessMsg(null);
+  };
+
+  const handleEditSuccess = () => {
+    setEditModalOpen(false);
+    setSelectedMahasiswa(null);
+    setEditSuccessMsg('Data mahasiswa berhasil diperbarui.');
+    fetchMahasiswa();
+  };
+
+  const handleEditCancel = () => {
+    setEditModalOpen(false);
+    setSelectedMahasiswa(null);
+  };
 
   const fetchMahasiswa = async () => {
     setLoading(true);
@@ -89,8 +244,24 @@ const MahasiswaList: React.FC = () => {
 
   return (
     <Card className="max-w-4xl mx-auto mt-8 p-6 shadow-lg">
-      <div className="flex justify-between items-center mb-6">
-        <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
+      {/* Edit Mahasiswa Dialog */}
+      <Dialog open={editModalOpen} onOpenChange={open => { if (!open) handleEditCancel(); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Mahasiswa</DialogTitle>
+          </DialogHeader>
+          {selectedMahasiswa && (
+            <EditMahasiswaForm
+              mahasiswa={selectedMahasiswa as any}
+              onSuccess={handleEditSuccess}
+              onCancel={handleEditCancel}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+      <div className="flex flex-col md:flex-row md:justify-between md:items-center mb-6 gap-4">
+        <div className="flex gap-2">
+          <Dialog open={isModalOpen} onOpenChange={setIsModalOpen}>
           <DialogTrigger asChild>
             <Button>Tambah Mahasiswa</Button>
           </DialogTrigger>
@@ -100,7 +271,13 @@ const MahasiswaList: React.FC = () => {
             </DialogHeader>
             <AddMahasiswaForm onSuccess={handleSuccess} />
           </DialogContent>
-        </Dialog>
+          </Dialog>
+          <Button variant="outline" onClick={handleDownloadTemplate}>Download Template</Button>
+          <Button variant="outline" onClick={() => setImportOpen(true)}>Import Excel</Button>
+          <Button variant="outline" onClick={handleExport}>Export Excel</Button>
+        </div>
+      {/* Import Mahasiswa Dialog */}
+      <ImportMahasiswaDialog open={importOpen} onOpenChange={setImportOpen} onSuccess={fetchMahasiswa} />
 
         <div className="flex items-center gap-4">
           <Select
@@ -136,29 +313,67 @@ const MahasiswaList: React.FC = () => {
         </div>
       </div>
 
+      {editSuccessMsg && (
+        <Alert className="mb-4" variant="success">
+          <AlertTitle>Sukses</AlertTitle>
+          <AlertDescription>{editSuccessMsg}</AlertDescription>
+        </Alert>
+      )}
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deleteConfirmId} onOpenChange={open => { if (!open) handleDeleteCancel(); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Konfirmasi Hapus Mahasiswa</DialogTitle>
+          </DialogHeader>
+          <div>Apakah Anda yakin ingin menghapus data mahasiswa ini?</div>
+          {deleteError && (
+            <Alert variant="destructive" className="my-2">
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>{deleteError}</AlertDescription>
+            </Alert>
+          )}
+          <div className="flex justify-end gap-2 mt-4">
+            <Button variant="outline" onClick={handleDeleteCancel} disabled={!!deleteLoadingId}>Batal</Button>
+            <Button variant="destructive" onClick={handleDeleteConfirm} disabled={!!deleteLoadingId}>
+              {deleteLoadingId ? 'Menghapus...' : 'Hapus'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <div className="overflow-x-auto">
         {loading && <div className="text-center py-4">Memuat data...</div>} {/* Show loading indicator during refetch */}
         <table className="min-w-full border bg-white dark:bg-neutral-900 rounded-lg text-sm">
           <thead className="bg-neutral-100 dark:bg-neutral-800">
             <tr>
+              <th className="border px-3 py-2">NRP</th>
               <th className="border px-3 py-2">Nama</th>
               <th className="border px-3 py-2">Departemen</th>
               <th className="border px-3 py-2">Pembimbing 1</th>
               <th className="border px-3 py-2">Pembimbing 2</th>
+              <th className="border px-3 py-2">Aksi</th>
             </tr>
           </thead>
           <tbody>
             {data.map((m) => (
               <tr key={m.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800 transition">
+                <td className="border px-3 py-2 font-mono">{m.nrp || '-'}</td>
                 <td className="border px-3 py-2 font-medium">{m.nama}</td>
                 <td className="border px-3 py-2">{m.departemen}</td>
                 <td className="border px-3 py-2">{m.pembimbing_1_nama || '-'}</td>
                 <td className="border px-3 py-2">{m.pembimbing_2_nama || '-'}</td>
+                <td className="border px-3 py-2 flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => handleEditClick(m)}>
+                    Edit
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={() => handleDeleteClick(m.id)} disabled={deleteLoadingId === m.id}>
+                    {deleteLoadingId === m.id ? 'Menghapus...' : 'Hapus'}
+                  </Button>
+                </td>
               </tr>
             ))}
             {data.length === 0 && !loading && (
               <tr>
-                <td colSpan={4} className="text-center py-4 border">Tidak ada data mahasiswa ditemukan.</td>
+                <td colSpan={6} className="text-center py-4 border">Tidak ada data mahasiswa ditemukan.</td>
               </tr>
             )}
           </tbody>

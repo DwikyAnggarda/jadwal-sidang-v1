@@ -179,7 +179,7 @@ app.post('/dosen/import', upload.single('file'), async (req, res) => {
         const sheet = workbook.Sheets[sheetName];
         dosenList = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
         // Remove header and example row
-        dosenList = dosenList.slice(2).filter(row => row[0]);
+        dosenList = dosenList.slice(1).filter(row => row[0]);
     } catch (err) {
         fs.unlinkSync(req.file.path);
         return res.status(400).json({ success: false, message: 'File excel tidak valid' });
@@ -221,18 +221,170 @@ app.post('/dosen/import', upload.single('file'), async (req, res) => {
     }
 });
 
-// Endpoint untuk menambahkan mahasiswa (tanpa pembimbing)
+// Endpoint untuk menambahkan mahasiswa (dengan NRP wajib unik)
 app.post('/mahasiswa', async (req, res) => {
-    const { nama, departemen } = req.body;
+    const { nrp, nama, departemen } = req.body;
+    if (!nrp || !nama || !departemen) {
+        return res.status(400).json({ success: false, message: 'Field nrp, nama, dan departemen wajib diisi' });
+    }
     try {
+        // Cek NRP unik
+        const exist = await pool.query('SELECT id FROM mahasiswa WHERE nrp = $1', [nrp]);
+        if (exist.rows.length > 0) {
+            return res.status(400).json({ success: false, message: 'NRP sudah digunakan oleh mahasiswa lain' });
+        }
         const result = await pool.query(
-            'INSERT INTO mahasiswa (nama, departemen) VALUES ($1, $2) RETURNING *',
-            [nama, departemen]
+            'INSERT INTO mahasiswa (nrp, nama, departemen) VALUES ($1, $2, $3) RETURNING *',
+            [nrp, nama, departemen]
         );
-        res.json(result.rows[0]);
+        res.json({ success: true, data: result.rows[0] });
     } catch (err) {
         console.error(err);
-        res.status(500).send('Server error');
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// Endpoint untuk update data mahasiswa (nama, departemen, nrp)
+app.put('/mahasiswa/:id', async (req, res) => {
+    const { id } = req.params;
+    const { nrp, nama, departemen } = req.body;
+    if (!nrp || !nama || !departemen) {
+        return res.status(400).json({ success: false, message: 'Field nrp, nama, dan departemen wajib diisi' });
+    }
+    try {
+        // Cek NRP unik (kecuali milik sendiri)
+        const exist = await pool.query('SELECT id FROM mahasiswa WHERE nrp = $1 AND id != $2', [nrp, id]);
+        if (exist.rows.length > 0) {
+            return res.status(400).json({ success: false, message: 'NRP sudah digunakan oleh mahasiswa lain' });
+        }
+        const result = await pool.query(
+            'UPDATE mahasiswa SET nrp = $1, nama = $2, departemen = $3 WHERE id = $4 RETURNING *',
+            [nrp, nama, departemen, id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Mahasiswa tidak ditemukan' });
+        }
+        res.json({ success: true, data: result.rows[0] });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// Endpoint untuk menghapus mahasiswa
+app.delete('/mahasiswa/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query('DELETE FROM mahasiswa WHERE id = $1 RETURNING *', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Mahasiswa tidak ditemukan' });
+        }
+        res.json({ success: true, message: 'Mahasiswa berhasil dihapus' });
+    } catch (err) {
+        // Cek jika error karena foreign key constraint (misal sudah punya sidang)
+        if (err.code === '23503') {
+            return res.status(400).json({ success: false, message: 'Mahasiswa tidak dapat dihapus karena masih digunakan di data lain (misal sudah punya sidang).' });
+        }
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// Endpoint untuk export data mahasiswa ke Excel
+app.get('/mahasiswa/export', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM mahasiswa ORDER BY nama ASC');
+        const mahasiswaRows = result.rows;
+        // Header kolom
+        const wsData = [
+            ['NRP', 'Nama', 'Departemen']
+        ];
+        // Data
+        mahasiswaRows.forEach(m => {
+            wsData.push([
+                m.nrp,
+                m.nama,
+                m.departemen
+            ]);
+        });
+        const workbook = xlsx.utils.book_new();
+        const worksheet = xlsx.utils.aoa_to_sheet(wsData);
+        xlsx.utils.book_append_sheet(workbook, worksheet, 'DataMahasiswa');
+        const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        res.setHeader('Content-Disposition', 'attachment; filename="data_mahasiswa.xlsx"');
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.send(buffer);
+    } catch (err) {
+        console.error(err);
+        res.status(500).send('Gagal export data mahasiswa');
+    }
+});
+// Endpoint untuk download template Excel mahasiswa
+app.get('/mahasiswa/template', (req, res) => {
+    const workbook = xlsx.utils.book_new();
+    const wsData = [
+        ['NRP', 'Nama', 'Departemen'],
+        ['Contoh: 05111940000001', 'Nama Mahasiswa', 'Teknik Informatika']
+    ];
+    const worksheet = xlsx.utils.aoa_to_sheet(wsData);
+    xlsx.utils.book_append_sheet(workbook, worksheet, 'TemplateMahasiswa');
+    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Disposition', 'attachment; filename="template_mahasiswa.xlsx"');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buffer);
+});
+
+// Endpoint untuk import data mahasiswa dari Excel
+app.post('/mahasiswa/import', upload.single('file'), async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ success: false, message: 'File Excel diperlukan' });
+    }
+    let mahasiswaList;
+    try {
+        const workbook = xlsx.readFile(req.file.path);
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        mahasiswaList = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        // Remove header and example row
+        mahasiswaList = mahasiswaList.slice(1).filter(row => row[0]);
+    } catch (err) {
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({ success: false, message: 'File excel tidak valid' });
+    }
+    fs.unlinkSync(req.file.path);
+
+    // Format: [NRP, Nama, Departemen]
+    if (!mahasiswaList.length) {
+        return res.status(400).json({ success: false, message: 'Data mahasiswa kosong di file' });
+    }
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        for (const row of mahasiswaList) {
+            const [nrp, nama, departemen] = row;
+            if (!nrp || !nama || !departemen) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, message: `Data tidak lengkap pada baris: ${JSON.stringify(row)}` });
+            }
+            // Cek duplikat NRP
+            const exist = await client.query('SELECT 1 FROM mahasiswa WHERE nrp = $1', [nrp]);
+            if (exist.rows.length > 0) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, message: `Mahasiswa dengan NRP "${nrp}" sudah ada di database.` });
+            }
+            await client.query(
+                'INSERT INTO mahasiswa (nrp, nama, departemen) VALUES ($1, $2, $3)',
+                [nrp, nama, departemen]
+            );
+        }
+        await client.query('COMMIT');
+        res.json({ success: true, message: 'Import data mahasiswa berhasil' });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+    } finally {
+        client.release();
     }
 });
 
