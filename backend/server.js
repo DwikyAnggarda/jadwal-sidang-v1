@@ -79,6 +79,148 @@ app.post('/dosen', async (req, res) => {
     }
 });
 
+// Endpoint untuk mengupdate data dosen
+app.put('/dosen/:id', async (req, res) => {
+    const { id } = req.params;
+    const { nama, departemen, no_hp } = req.body;
+    if (!nama || !departemen || !no_hp) {
+        return res.status(400).send('Field nama, departemen, dan no_hp wajib diisi');
+    }
+    try {
+        const result = await pool.query(
+            'UPDATE dosen SET nama = $1, departemen = $2, no_hp = $3 WHERE id = $4 RETURNING *',
+            [nama, departemen, no_hp, id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).send('Dosen tidak ditemukan');
+        }
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).send('Server error');
+    }
+});
+
+// Endpoint untuk menghapus dosen
+app.delete('/dosen/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query('DELETE FROM dosen WHERE id = $1 RETURNING *', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Dosen tidak ditemukan' });
+        }
+        res.json({ success: true, message: 'Dosen berhasil dihapus' });
+    } catch (err) {
+        // Cek jika error karena foreign key constraint
+        if (err.code === '23503') {
+            return res.status(400).json({ success: false, message: 'Dosen tidak dapat dihapus karena masih digunakan di data lain.' });
+        }
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// Endpoint untuk export data dosen ke Excel
+app.get('/dosen/export', async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM dosen ORDER BY nama ASC');
+        const dosenRows = result.rows;
+        // Header kolom
+        const wsData = [
+            ['Nama', 'Departemen', 'No HP', 'Maksimal Bimbingan', 'Bimbingan Saat Ini']
+        ];
+        // Data
+        dosenRows.forEach(d => {
+            wsData.push([
+                d.nama,
+                d.departemen,
+                d.no_hp,
+                d.maksimal_bimbingan ?? '',
+                d.bimbingan_saat_ini ?? ''
+            ]);
+        });
+        const workbook = xlsx.utils.book_new();
+        const worksheet = xlsx.utils.aoa_to_sheet(wsData);
+        xlsx.utils.book_append_sheet(workbook, worksheet, 'DataDosen');
+        const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        res.setHeader('Content-Disposition', 'attachment; filename="data_dosen.xlsx"');
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.send(buffer);
+    } catch (err) {
+        console.error(err);
+        res.status(500).send('Gagal export data dosen');
+    }
+});
+
+// Endpoint untuk download template Excel dosen
+app.get('/dosen/template', (req, res) => {
+    const workbook = xlsx.utils.book_new();
+    const wsData = [
+        ['Nama', 'Departemen', 'No HP', 'Maksimal Bimbingan'],
+        ['Contoh: Dosen A', 'Teknik Informatika', '081234567890', '5']
+    ];
+    const worksheet = xlsx.utils.aoa_to_sheet(wsData);
+    xlsx.utils.book_append_sheet(workbook, worksheet, 'TemplateDosen');
+    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Disposition', 'attachment; filename="template_dosen.xlsx"');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buffer);
+});
+
+// Endpoint untuk import data dosen dari Excel
+app.post('/dosen/import', upload.single('file'), async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ success: false, message: 'File Excel diperlukan' });
+    }
+    let dosenList;
+    try {
+        const workbook = xlsx.readFile(req.file.path);
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+        dosenList = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        // Remove header and example row
+        dosenList = dosenList.slice(2).filter(row => row[0]);
+    } catch (err) {
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({ success: false, message: 'File excel tidak valid' });
+    }
+    fs.unlinkSync(req.file.path);
+
+    // Format: [Nama, Departemen, No HP, Maksimal Bimbingan]
+    if (!dosenList.length) {
+        return res.status(400).json({ success: false, message: 'Data dosen kosong di file' });
+    }
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        for (const row of dosenList) {
+            const [nama, departemen, no_hp, maksimal_bimbingan] = row;
+            if (!nama || !departemen || !no_hp || !maksimal_bimbingan) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, message: `Data tidak lengkap pada baris: ${JSON.stringify(row)}` });
+            }
+            // Cek duplikat nama dosen
+            const exist = await client.query('SELECT 1 FROM dosen WHERE LOWER(nama) = LOWER($1)', [nama]);
+            if (exist.rows.length > 0) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, message: `Dosen dengan nama "${nama}" sudah ada di database.` });
+            }
+            await client.query(
+                'INSERT INTO dosen (nama, departemen, no_hp, maksimal_bimbingan, bimbingan_saat_ini) VALUES ($1, $2, $3, $4, 0)',
+                [nama, departemen, no_hp, parseInt(maksimal_bimbingan, 10)]
+            );
+        }
+        await client.query('COMMIT');
+        res.json({ success: true, message: 'Import data dosen berhasil' });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+    } finally {
+        client.release();
+    }
+});
+
 // Endpoint untuk menambahkan mahasiswa (tanpa pembimbing)
 app.post('/mahasiswa', async (req, res) => {
     const { nama, departemen } = req.body;
