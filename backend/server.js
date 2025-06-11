@@ -900,9 +900,11 @@ app.post('/sidang/batch-assign', upload.single('file'), async (req, res) => {
 
 // Endpoint untuk penjadwalan moderator sidang otomatis (OLD - replaced by /sidang/moderator/assign)
 app.post('/moderator/assign', upload.single('file'), async (req, res) => {
-    const { tanggal_sidang, jam_awal, jam_akhir, durasi_sidang } = req.body;
 
-    // Validasi field wajib
+    let { tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang } = req.body;
+    if (!jenis_sidang) jenis_sidang = 'Skripsi';
+
+    // Validasi field wajib (jenis_sidang tidak wajib, default Skripsi)
     if (!tanggal_sidang || !jam_awal || !jam_akhir || !durasi_sidang || !req.file) {
         return res.status(400).json({ success: false, message: 'Field tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, dan file diperlukan' });
     }
@@ -927,8 +929,25 @@ app.post('/moderator/assign', upload.single('file'), async (req, res) => {
         return res.status(400).json({ success: false, message: 'jam_akhir harus setelah jam_awal' });
     }
 
+    // Tambahan validasi: Cek apakah sudah ada sidang_group di tanggal yang sama
+    try {
+        const groupCheck = await pool.query('SELECT id FROM sidang_group WHERE tanggal_sidang = $1', [tanggal_sidang]);
+        if (groupCheck.rows.length > 0) {
+            return res.status(409).json({
+                success: false,
+                message: `Jadwal Sidang pada tanggal ${new Date(tanggal_sidang).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })} sudah dibuat atau di-generate. Silahkan cari tanggal lain atau hapus data sebelumnya.`
+            });
+        }
+    } catch (err) {
+        return res.status(500).json({ success: false, message: 'Gagal validasi tanggal sidang: ' + err.message });
+    }
+
     // Parse Excel
     let mahasiswaList;
+    let client;
+    // --- Deklarasi untuk warning mapping ID ---
+    let idWarning = false;
+    let idWarningList = [];
     try {
         const workbook = xlsx.readFile(req.file.path);
         const sheetName = workbook.SheetNames[0];
@@ -982,7 +1001,9 @@ app.post('/moderator/assign', upload.single('file'), async (req, res) => {
             });
         }
 
+
         // Hitung sesi
+
         function timeToMinutes(t) {
             const [h, m] = t.split(':').map(Number);
             return h * 60 + m;
@@ -1007,6 +1028,17 @@ app.post('/moderator/assign', upload.single('file'), async (req, res) => {
         if (totalSesi <= 0) {
             return res.status(400).json({ success: false, message: 'Rentang waktu tidak cukup untuk satu sesi sidang.' });
         }
+
+        // --- Tambahan: Simpan ke sidang_group dan sidang_item ---
+        client = await pool.connect();
+        await client.query('BEGIN');
+        // Insert ke sidang_group
+        const groupResult = await client.query(
+            `INSERT INTO sidang_group (tanggal_sidang, jam_awal, jam_akhir, jenis_sidang, durasi_sidang, status_sidang)
+             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+            [tanggal_sidang, jam_awal, jam_akhir, jenis_sidang || 'Skripsi', durasi, 0]
+        );
+        const sidang_group_id = groupResult.rows[0].id;
 
         // Penjadwalan moderator sesuai algoritma revisi
         // Tracking jumlah sesi moderator per dosen per hari
@@ -1048,6 +1080,10 @@ app.post('/moderator/assign', upload.single('file'), async (req, res) => {
         let roomNo = 1;
         let sesiIdx = 0;
         let finalOutput = [];
+        // Buat map nama dosen ke id (untuk keperluan downstream jika perlu)
+        const namaToId = {};
+        dosenResult.rows.forEach(d => { namaToId[d.nama] = d.id; });
+
         Object.keys(moderatorGroups).forEach(moderatorNama => {
             const group = moderatorGroups[moderatorNama];
             group.forEach(m => {
@@ -1063,8 +1099,11 @@ app.post('/moderator/assign', upload.single('file'), async (req, res) => {
                     nama_mahasiswa: m.nama,
                     judul: m.judul,
                     moderator: m.moderator,
+                    moderator_id: m.moderator ? namaToId[m.moderator] : null,
                     pembimbing_1: m.pembimbing_1_nama,
-                    pembimbing_2: m.pembimbing_2_nama
+                    pembimbing_1_id: m.pembimbing_1_nama ? namaToId[m.pembimbing_1_nama] : null,
+                    pembimbing_2: m.pembimbing_2_nama,
+                    pembimbing_2_id: m.pembimbing_2_nama ? namaToId[m.pembimbing_2_nama] : null
                 });
                 sesiIdx++;
             });
@@ -1257,25 +1296,185 @@ app.post('/moderator/assign', upload.single('file'), async (req, res) => {
         // Step 5: Penomoran ulang field no
         hasilAkhir = hasilAkhir.map((m, idx) => ({ ...m, no: idx + 1 }));
 
+        // --- Tambahan: Simpan ke sidang_group dan sidang_item TANPA mengubah logic output lama ---
+        // Semua logic di bawah ini tidak mengubah hasil output, hanya insert data ke 2 tabel baru
+        // Insert dilakukan setelah hasilAkhir selesai dibuat
+        // Ensure mapping variables are available in this scope
+        const nrpToMhsId = {};
+        mahasiswaResult.rows.forEach(m => { nrpToMhsId[m.nrp] = m.id; });
+        let client2;
+        try {
+            client2 = await pool.connect();
+            await client2.query('BEGIN');
+            // Buat map kelas -> array mahasiswa
+            const kelasMap = {};
+            hasilAkhir.forEach(m => {
+                if (!kelasMap[m.kelas]) kelasMap[m.kelas] = [];
+                kelasMap[m.kelas].push(m);
+            });
+            for (const [kelasNo, arr] of Object.entries(kelasMap)) {
+                // jam_awal dan jam_akhir dari sesi pertama dan terakhir
+                const jam_awal = arr[0].jam_mulai;
+                const jam_akhir = arr[arr.length - 1].jam_selesai;
+                // Insert ke sidang_group
+                const groupRes = await client2.query(
+                    `INSERT INTO sidang_group (tanggal_sidang, jam_awal, jam_akhir, durasi_sidang) VALUES ($1,$2,$3,$4) RETURNING id`,
+                    [tanggal_sidang, jam_awal, jam_akhir, durasi_sidang]
+                );
+                const groupId = groupRes.rows[0].id;
+                // Insert semua mahasiswa di kelas ini ke sidang_item
+                for (const m of arr) {
+                    // Selalu gunakan *_id dari object jika ada, jika tidak, lookup dari nama (khusus penguji_1_id/penguji_2_id lookup ke DB jika perlu)
+                    const pembimbing_1_id = m.pembimbing_1_id || (m.pembimbing_1 ? namaToId[m.pembimbing_1.trim()] || null : null);
+                    const pembimbing_2_id = m.pembimbing_2_id || (m.pembimbing_2 ? namaToId[m.pembimbing_2.trim()] || null : null);
+                    const moderator_id = m.moderator_id || (m.moderator ? namaToId[m.moderator.trim()] || null : null);
+                    let penguji_1_id = m.penguji_1_id || null;
+                    let penguji_2_id = m.penguji_2_id || null;
+                    // Jika penguji_1_id/penguji_2_id belum ada, lookup ke DB berdasarkan nama
+                    if (!penguji_1_id && m.penguji_1) {
+                        const res = await client2.query('SELECT id FROM dosen WHERE LOWER(TRIM(nama)) = $1 LIMIT 1', [m.penguji_1.trim().toLowerCase()]);
+                        penguji_1_id = res.rows.length > 0 ? res.rows[0].id : null;
+                    }
+                    if (!penguji_2_id && m.penguji_2) {
+                        const res = await client2.query('SELECT id FROM dosen WHERE LOWER(TRIM(nama)) = $1 LIMIT 1', [m.penguji_2.trim().toLowerCase()]);
+                        penguji_2_id = res.rows.length > 0 ? res.rows[0].id : null;
+                    }
+                    const mahasiswa_id = m.mahasiswa_id || (m.nrp ? nrpToMhsId[m.nrp] || null : null);
+                    // Track warning if any id is null
+                    if (!mahasiswa_id || !penguji_1_id || !penguji_2_id) {
+                        idWarning = true;
+                        idWarningList.push({
+                            nrp: m.nrp,
+                            mahasiswa_id,
+                            penguji_1: m.penguji_1,
+                            penguji_1_id,
+                            penguji_2: m.penguji_2,
+                            penguji_2_id
+                        });
+                    }
+                    await client2.query(
+                        `INSERT INTO sidang_item (group_id, mahasiswa_id, moderator_id, pembimbing_1_id, pembimbing_2_id, penguji_1_id, penguji_2_id, jam_mulai, jam_selesai) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+                        [groupId, mahasiswa_id, moderator_id, pembimbing_1_id, pembimbing_2_id, penguji_1_id, penguji_2_id, m.jam_mulai, m.jam_selesai]
+                    );
+                }
+            }
+            await client2.query('COMMIT');
+        } catch (err) {
+            if (client2) await client2.query('ROLLBACK');
+            console.error('Gagal insert sidang_group/sidang_item:', err);
+            // Tidak mengubah response ke user, hanya log error
+        } finally {
+            if (client2) client2.release();
+        }
+
+        // console.log('namaToId:', namaToId);
+        // return res.status(200).json({ message: 'namaToId', namaToId });
+
+        // Simpan ke sidang_item (legacy insert, ensure all *_id fields are mapped)
+        for (const m of hasilAkhir) {
+            // Map all *_id fields before insert (gunakan namaToId/nrpToMhsId yang sudah dideklarasi di atas)
+            // const pembimbing_1_id = m.pembimbing_1 ? namaToId[m.pembimbing_1.trim().toLowerCase()] || null : null;
+            const pembimbing_1_id = m.pembimbing_1_id;
+            const pembimbing_2_id = m.pembimbing_2_id;
+            const penguji_1_id = m.penguji_1 ? namaToId[m.penguji_1.trim()] || null : null;
+            const penguji_2_id = m.penguji_2 ? namaToId[m.penguji_2.trim()] || null : null;
+            const moderator_id = m.moderator_id;
+            // const moderator_id = m.moderator ? namaToId[m.moderator.trim().toLowerCase()] || null : null;
+            const mahasiswa_id = m.nrp ? nrpToMhsId[m.nrp] || m.mahasiswa_id || null : m.mahasiswa_id || null;
+            // Track warning if any id is null
+            if (!mahasiswa_id || !penguji_1_id || !penguji_2_id) {
+                idWarning = true;
+                idWarningList.push({
+                    nrp: m.nrp,
+                    mahasiswa_id,
+                    penguji_1: m.penguji_1,
+                    penguji_1_id,
+                    penguji_2: m.penguji_2,
+                    penguji_2_id
+                });
+            }
+            await client.query(
+                `INSERT INTO sidang_item (
+                    mahasiswa_id, pembimbing_1_id, pembimbing_2_id, penguji_1_id, penguji_2_id, moderator_id, sidang_group_id, room, tanggal_sidang, durasi_sidang, jam_mulai_final, jam_selesai_final, nrp, nama_mahasiswa, judul, jenis_sidang
+                ) VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16
+                )`,
+                [
+                    mahasiswa_id,
+                    pembimbing_1_id,
+                    pembimbing_2_id,
+                    penguji_1_id,
+                    penguji_2_id,
+                    moderator_id,
+                    sidang_group_id,
+                    m.kelas ? m.kelas.toString() : null,
+                    // m.room ? m.room.toString() : null,
+                    tanggal_sidang,
+                    durasi,
+                    m.jam_mulai || m.jam_mulai_final || null,
+                    m.jam_selesai || m.jam_selesai_final || null,
+                    m.nrp,
+                    m.nama || m.nama_mahasiswa,
+                    m.judul,
+                    jenis_sidang || 'Skripsi'
+                ]
+            );
+        }
+        await client.query('COMMIT');
+
         // Warning jika ada kelas yang kekurangan dosen penguji atau jadwal tidak bisa dijadwalkan
         const adaWarning = hasilAkhir.some(m => !m.penguji_1 || !m.penguji_2 || m.jam_mulai === null);
-        if (adaWarning) {
+        if (adaWarning || idWarning) {
             return res.status(200).json({
                 success: true,
-                warning: 'Beberapa kelas kekurangan dosen penguji atau jadwal kelas tidak dapat dijadwalkan dalam rentang waktu yang tersedia.',
+                warning: 'Beberapa kelas kekurangan dosen penguji, jadwal kelas tidak dapat dijadwalkan dalam rentang waktu yang tersedia, atau ada field ID yang gagal di-mapping.',
+                idMappingWarning: idWarningList,
                 data: hasilAkhir
             });
         }
 
         return res.json({ success: true, data: hasilAkhir });
     } catch (err) {
+        if (client) await client.query('ROLLBACK');
         console.error("Error in /sidang/moderator/assign:", err);
         return res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+    } finally {
+        if (client) client.release();
     }
 });
 
 // module.exports = app;
-
-app.listen(5000, () => {
-    console.log('Server berjalan di port 5000');
+// Endpoint untuk menghapus data sidang_group dan sidang_item berdasarkan id group
+app.delete('/sidang/:id', async (req, res) => {
+    const { id } = req.params;
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        // Pastikan sidang_group ada
+        const groupRes = await client.query('SELECT id FROM sidang_group WHERE id = $1', [id]);
+        if (groupRes.rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ success: false, message: 'Data sidang_group tidak ditemukan' });
+        }
+        // Hapus semua sidang_item yang terkait
+        await client.query('DELETE FROM sidang_item WHERE sidang_group_id = $1', [id]);
+        // Hapus sidang_group
+        await client.query('DELETE FROM sidang_group WHERE id = $1', [id]);
+        await client.query('COMMIT');
+        return res.json({ success: true, message: 'Data sidang berhasil dihapus' });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error('Gagal menghapus data sidang:', err);
+        return res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+    } finally {
+        client.release();
+    }
 });
+
+if (require.main === module) {
+    app.listen(5000, () => {
+        console.log('Server berjalan di port 5000');
+    });
+}
+
+module.exports = app;
