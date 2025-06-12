@@ -25,3 +25,4 @@ dist-ssr
 backend/uploads
 uploads/*
 package-lock.json
+.wwebjs_auth/

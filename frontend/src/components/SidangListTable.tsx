@@ -2,6 +2,9 @@ import React, { useEffect, useState } from 'react';
 import api from '../api/axios';
 import { Card } from './ui/card';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
+import { Button } from './ui/button';
+import { MessageCircle } from 'lucide-react';
+import { toast } from './ui/toast';
 
 interface Sidang {
   id: number;
@@ -24,6 +27,7 @@ const SidangList: React.FC = () => {
   const [data, setData] = useState<Sidang[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notificationLoading, setNotificationLoading] = useState<number | null>(null);
 
   useEffect(() => {
     api.get<Sidang[]>('/sidang')
@@ -31,6 +35,33 @@ const SidangList: React.FC = () => {
       .catch(err => setError(err.message))
       .finally(() => setLoading(false));
   }, []);
+
+  // Send notification for a specific sidang
+  const handleSendNotification = async (sidangId: number, mahasiswaName: string) => {
+    setNotificationLoading(sidangId);
+    try {
+      const response = await fetch(`http://localhost:5000/notifications/sidang/${sidangId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        const { summary } = result;
+        toast.success(`Notifikasi untuk ${mahasiswaName}: ${summary.sent} berhasil, ${summary.failed} gagal dari ${summary.total} total`);
+      } else {
+        toast.error(result.message || 'Gagal mengirim notifikasi');
+      }
+    } catch (error) {
+      console.error('Error sending notification:', error);
+      toast.error('Terjadi kesalahan saat mengirim notifikasi');
+    } finally {
+      setNotificationLoading(null);
+    }
+  };
 
   if (loading) return <div className="text-center py-8">Loading...</div>;
   if (error) return (
@@ -57,6 +88,7 @@ const SidangList: React.FC = () => {
               <th className="border px-3 py-2">Pembimbing 2</th>
               <th className="border px-3 py-2">Penguji 1</th>
               <th className="border px-3 py-2">Penguji 2</th>
+              <th className="border px-3 py-2">Aksi</th>
               {/* <th className="border px-3 py-2">Durasi (menit)</th> */}
             </tr>
           </thead>
@@ -73,6 +105,21 @@ const SidangList: React.FC = () => {
                 <td className="border px-3 py-2">{s.pembimbing_2_nama}</td>
                 <td className="border px-3 py-2">{s.penguji_1_nama}</td>
                 <td className="border px-3 py-2">{s.penguji_2_nama}</td>
+                <td className="border px-3 py-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleSendNotification(s.id, s.mahasiswa_nama)}
+                    disabled={notificationLoading === s.id}
+                    title={`Kirim Notifikasi WhatsApp untuk ${s.mahasiswa_nama}`}
+                  >
+                    {notificationLoading === s.id ? (
+                      <div className="w-4 h-4 animate-spin rounded-full border-2 border-gray-300 border-t-gray-600" />
+                    ) : (
+                      <MessageCircle className="w-4 h-4" />
+                    )}
+                  </Button>
+                </td>
                 {/* <td className="border px-3 py-2">{s.durasi_sidang ?? '-'}</td> */}
               </tr>
             ))}

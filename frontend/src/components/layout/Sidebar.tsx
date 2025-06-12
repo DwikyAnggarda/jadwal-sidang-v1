@@ -9,8 +9,10 @@ const navLinks = [
 	{ to: '/rule', label: 'Rule' },
 	{ to: '/mahasiswa', label: 'Mahasiswa' },
 	{ to: '/dosen', label: 'Dosen' },
-	{ to: '/daftar-sidang', label: 'Daftar Jadwal Sidang' },
-	{ to: '/sidang', label: 'Assign Sidang' },
+	{ to: '/sidang-group', label: 'Daftar Sidang' },
+	{ to: '/whatsapp-setup', label: 'WhatsApp Setup' },
+	// { to: '/sidang', label: 'Assign Sidang' },
+	// { to: '/daftar-sidang', label: 'Daftar Jadwal Sidang' },
 	// { to: '/pembimbing', label: 'Assign Pembimbing' },
 ];
 
