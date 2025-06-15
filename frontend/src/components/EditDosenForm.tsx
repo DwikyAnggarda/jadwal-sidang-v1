@@ -8,12 +8,12 @@ import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 
 interface FormValues {
   nama: string;
-  departemen: string;
+  nip: string;
   no_hp: string;
 }
 
 interface EditDosenFormProps {
-  dosen: { id: number; nama: string; departemen: string; no_hp: string };
+  dosen: { id: number; nama: string; nip: string; no_hp: string };
   onSuccess: () => void;
   onCancel?: () => void;
 }
@@ -26,7 +26,7 @@ const EditDosenForm: React.FC<EditDosenFormProps> = ({ dosen, onSuccess, onCance
   const form = useForm<FormValues>({
     defaultValues: {
       nama: dosen.nama,
-      departemen: dosen.departemen,
+      nip: dosen.nip,
       no_hp: dosen.no_hp,
     },
   });
@@ -66,11 +66,11 @@ const EditDosenForm: React.FC<EditDosenFormProps> = ({ dosen, onSuccess, onCance
         />
         <FormField
           control={form.control}
-          name="departemen"
-          rules={{ required: 'Departemen wajib diisi' }}
+          name="nip"
+          rules={{ required: 'NIP wajib diisi' }}
           render={({ field }) => (
             <FormItem>
-              <FormLabel>Departemen</FormLabel>
+              <FormLabel>NIP</FormLabel>
               <FormControl>
                 <Input type="text" {...field} required />
               </FormControl>

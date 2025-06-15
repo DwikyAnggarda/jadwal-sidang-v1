@@ -233,38 +233,51 @@ app.get('/mahasiswa', authenticateToken, async (req, res) => {
 
 // Endpoint untuk menambahkan dosen
 app.post('/dosen', authenticateToken, async (req, res) => {
-    const { nama, departemen, no_hp } = req.body;
+    const { nama, nip, no_hp } = req.body;
+    if (!nama || !nip || !no_hp) {
+        return res.status(400).json({ success: false, message: 'Field nama, nip, dan no_hp wajib diisi' });
+    }
     try {
+        // Cek NIP unik
+        const exist = await pool.query('SELECT id FROM dosen WHERE nip = $1', [nip]);
+        if (exist.rows.length > 0) {
+            return res.status(400).json({ success: false, message: 'NIP sudah digunakan oleh dosen lain' });
+        }
         const result = await pool.query(
-            'INSERT INTO dosen (nama, departemen, no_hp) VALUES ($1, $2, $3) RETURNING *',
-            [nama, departemen, no_hp]
+            'INSERT INTO dosen (nama, nip, no_hp) VALUES ($1, $2, $3) RETURNING *',
+            [nama, nip, no_hp]
         );
-        res.json(result.rows[0]);
+        res.json({ success: true, data: result.rows[0] });
     } catch (err) {
         console.error(err);
-        res.status(500).send('Server error');
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 });
 
 // Endpoint untuk mengupdate data dosen
 app.put('/dosen/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
-    const { nama, departemen, no_hp } = req.body;
-    if (!nama || !departemen || !no_hp) {
-        return res.status(400).send('Field nama, departemen, dan no_hp wajib diisi');
+    const { nama, nip, no_hp } = req.body;
+    if (!nama || !nip || !no_hp) {
+        return res.status(400).json({ success: false, message: 'Field nama, nip, dan no_hp wajib diisi' });
     }
     try {
+        // Cek NIP unik (kecuali milik sendiri)
+        const exist = await pool.query('SELECT id FROM dosen WHERE nip = $1 AND id != $2', [nip, id]);
+        if (exist.rows.length > 0) {
+            return res.status(400).json({ success: false, message: 'NIP sudah digunakan oleh dosen lain' });
+        }
         const result = await pool.query(
-            'UPDATE dosen SET nama = $1, departemen = $2, no_hp = $3 WHERE id = $4 RETURNING *',
-            [nama, departemen, no_hp, id]
+            'UPDATE dosen SET nama = $1, nip = $2, no_hp = $3 WHERE id = $4 RETURNING *',
+            [nama, nip, no_hp, id]
         );
         if (result.rows.length === 0) {
-            return res.status(404).send('Dosen tidak ditemukan');
+            return res.status(404).json({ success: false, message: 'Dosen tidak ditemukan' });
         }
-        res.json(result.rows[0]);
+        res.json({ success: true, data: result.rows[0] });
     } catch (err) {
         console.error(err);
-        res.status(500).send('Server error');
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 });
 
@@ -294,16 +307,14 @@ app.get('/dosen/export', authenticateToken, async (req, res) => {
         const dosenRows = result.rows;
         // Header kolom
         const wsData = [
-            ['Nama', 'Departemen', 'No HP', 'Maksimal Bimbingan', 'Bimbingan Saat Ini']
+            ['Nama', 'NIP', 'No HP']
         ];
         // Data
         dosenRows.forEach(d => {
             wsData.push([
                 d.nama,
-                d.departemen,
-                d.no_hp,
-                d.maksimal_bimbingan ?? '',
-                d.bimbingan_saat_ini ?? ''
+                d.nip,
+                d.no_hp
             ]);
         });
         const workbook = xlsx.utils.book_new();
@@ -323,8 +334,8 @@ app.get('/dosen/export', authenticateToken, async (req, res) => {
 app.get('/dosen/template', authenticateToken, (req, res) => {
     const workbook = xlsx.utils.book_new();
     const wsData = [
-        ['Nama', 'Departemen', 'No HP', 'Maksimal Bimbingan'],
-        ['Contoh: Dosen A', 'Teknik Informatika', '081234567890', '5']
+        ['Nama', 'NIP', 'No HP'],
+        ['Contoh: Dosen A', '123456789', '081234567890']
     ];
     const worksheet = xlsx.utils.aoa_to_sheet(wsData);
     xlsx.utils.book_append_sheet(workbook, worksheet, 'TemplateDosen');
@@ -340,10 +351,29 @@ app.post('/dosen/import', authenticateToken, upload.single('file'), async (req, 
         return res.status(400).json({ success: false, message: 'File Excel diperlukan' });
     }
     let dosenList;
+    let workbook;
     try {
-        const workbook = xlsx.readFile(req.file.path);
+        workbook = xlsx.readFile(req.file.path);
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
+        
+        // Validasi header Excel file
+        const allData = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        if (allData.length > 0) {
+            const headers = allData[0];
+            const expectedHeaders = ['Nama', 'NIP', 'No HP'];
+            const headersValid = expectedHeaders.every((header, index) => 
+                headers[index] && headers[index].toString().trim().toLowerCase() === header.toLowerCase()
+            );
+            if (!headersValid) {
+                fs.unlinkSync(req.file.path);
+                return res.status(400).json({ 
+                    success: false, 
+                    message: `Header Excel tidak sesuai template. Expected: ${expectedHeaders.join(', ')}` 
+                });
+            }
+        }
+        
         dosenList = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
         // Remove header and example row
         dosenList = dosenList.slice(1).filter(row => row[0]);
@@ -353,7 +383,7 @@ app.post('/dosen/import', authenticateToken, upload.single('file'), async (req, 
     }
     fs.unlinkSync(req.file.path);
 
-    // Format: [Nama, Departemen, No HP, Maksimal Bimbingan]
+    // Format: [Nama, NIP, No HP]
     if (!dosenList.length) {
         return res.status(400).json({ success: false, message: 'Data dosen kosong di file' });
     }
@@ -361,20 +391,20 @@ app.post('/dosen/import', authenticateToken, upload.single('file'), async (req, 
     try {
         await client.query('BEGIN');
         for (const row of dosenList) {
-            const [nama, departemen, no_hp, maksimal_bimbingan] = row;
-            if (!nama || !departemen || !no_hp || !maksimal_bimbingan) {
+            const [nama, nip, no_hp] = row;
+            if (!nama || !nip || !no_hp) {
                 await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: `Data tidak lengkap pada baris: ${JSON.stringify(row)}` });
             }
-            // Cek duplikat nama dosen
-            const exist = await client.query('SELECT 1 FROM dosen WHERE LOWER(nama) = LOWER($1)', [nama]);
+            // Cek duplikat NIP
+            const exist = await client.query('SELECT 1 FROM dosen WHERE nip = $1', [nip]);
             if (exist.rows.length > 0) {
                 await client.query('ROLLBACK');
-                return res.status(400).json({ success: false, message: `Dosen dengan nama "${nama}" sudah ada di database.` });
+                return res.status(400).json({ success: false, message: `Dosen dengan NIP "${nip}" sudah ada di database.` });
             }
             await client.query(
-                'INSERT INTO dosen (nama, departemen, no_hp, maksimal_bimbingan, bimbingan_saat_ini) VALUES ($1, $2, $3, $4, 0)',
-                [nama, departemen, no_hp, parseInt(maksimal_bimbingan, 10)]
+                'INSERT INTO dosen (nama, nip, no_hp) VALUES ($1, $2, $3)',
+                [nama, nip, no_hp]
             );
         }
         await client.query('COMMIT');
@@ -699,19 +729,14 @@ app.post('/pembimbing/assign', authenticateToken, async (req, res) => {
             if (pembimbing_1_id === pembimbing_2_id) {
                 return res.status(400).send('Pembimbing harus berbeda');
             }
-            const dosenResult = await pool.query('SELECT id, bimbingan_saat_ini, maksimal_bimbingan FROM dosen WHERE id IN ($1, $2)', [pembimbing_1_id, pembimbing_2_id]);
+            const dosenResult = await pool.query('SELECT id FROM dosen WHERE id IN ($1, $2)', [pembimbing_1_id, pembimbing_2_id]);
             if (dosenResult.rows.length !== 2) {
                 return res.status(400).send('Satu atau kedua pembimbing tidak ditemukan');
-            }
-            for (const dosen of dosenResult.rows) {
-                if (dosen.bimbingan_saat_ini >= dosen.maksimal_bimbingan) {
-                    return res.status(400).send(`Pembimbing ${dosen.id} telah mencapai kapasitas maksimum`);
-                }
             }
             supervisor1 = dosenResult.rows.find(d => d.id === pembimbing_1_id);
             supervisor2 = dosenResult.rows.find(d => d.id === pembimbing_2_id);
         } else {
-            const availableDosenResult = await pool.query('SELECT id FROM dosen WHERE bimbingan_saat_ini < maksimal_bimbingan');
+            const availableDosenResult = await pool.query('SELECT id FROM dosen');
             const availableDosen = availableDosenResult.rows;
             if (availableDosen.length < 2) {
                 return res.status(400).send('Tidak cukup pembimbing yang tersedia');
@@ -721,7 +746,6 @@ app.post('/pembimbing/assign', authenticateToken, async (req, res) => {
             supervisor2 = shuffled[1];
         }
         await pool.query('UPDATE mahasiswa SET pembimbing_1_id = $1, pembimbing_2_id = $2 WHERE id = $3', [supervisor1.id, supervisor2.id, mahasiswa_id]);
-        await pool.query('UPDATE dosen SET bimbingan_saat_ini = bimbingan_saat_ini + 1 WHERE id IN ($1, $2)', [supervisor1.id, supervisor2.id]);
         res.send('Pembimbing berhasil ditugaskan');
     } catch (err) {
         console.error(err);
@@ -1465,8 +1489,10 @@ app.post('/moderator/assign', authenticateToken, upload.single('file'), async (r
                         });
                     }
                     await client2.query(
-                        `INSERT INTO sidang_item (sidang_group_id, mahasiswa_id, moderator_id, pembimbing_1_id, pembimbing_2_id, penguji_1_id, penguji_2_id, jam_mulai, jam_selesai) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
-                        [groupId, mahasiswa_id, moderator_id, pembimbing_1_id, pembimbing_2_id, penguji_1_id, penguji_2_id, m.jam_mulai, m.jam_selesai]
+                        `INSERT INTO sidang_item (sidang_group_id, mahasiswa_id, moderator_id, pembimbing_1_id, pembimbing_2_id, penguji_1_id, penguji_2_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+                        [groupId, mahasiswa_id, moderator_id, pembimbing_1_id, pembimbing_2_id, penguji_1_id, penguji_2_id]
+                        // `INSERT INTO sidang_item (sidang_group_id, mahasiswa_id, moderator_id, pembimbing_1_id, pembimbing_2_id, penguji_1_id, penguji_2_id, jam_mulai, jam_selesai) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+                        // [groupId, mahasiswa_id, moderator_id, pembimbing_1_id, pembimbing_2_id, penguji_1_id, penguji_2_id, m.jam_mulai, m.jam_selesai]
                     );
                 }
             }
@@ -1791,19 +1817,19 @@ app.get('/sidang-group/export', authenticateToken, async (req, res) => {
             const items = detailResult.rows;
             
             const detailData = [
-                ['ID Grup', 'Tanggal', 'NRP', 'Nama Mahasiswa', 'Judul', 'Ruang', 'Jam Mulai', 'Jam Selesai', 'Moderator', 'Pembimbing 1', 'Pembimbing 2', 'Penguji 1', 'Penguji 2']
+                ['ID Grup', 'Tanggal', 'Ruang', 'Jam Mulai', 'Jam Selesai', 'NRP', 'Nama Mahasiswa', 'Judul', 'Moderator', 'Pembimbing 1', 'Pembimbing 2', 'Penguji 1', 'Penguji 2']
             ];
             
             items.forEach(item => {
                 detailData.push([
                     item.grup_id,
                     item.tanggal_sidang,
-                    item.nrp,
-                    item.nama_mahasiswa,
-                    item.judul,
                     item.room,
                     item.jam_mulai,
                     item.jam_selesai,
+                    item.nrp,
+                    item.nama_mahasiswa,
+                    item.judul,
                     item.moderator_nama || '-',
                     item.pembimbing_1_nama || '-',
                     item.pembimbing_2_nama || '-',
@@ -1911,18 +1937,18 @@ app.get('/sidang-group/:id/export', authenticateToken, async (req, res) => {
         
         // Sheet 2: Detail Mahasiswa
         const detailData = [
-            ['No', 'NRP', 'Nama Mahasiswa', 'Judul', 'Ruang', 'Jam Mulai', 'Jam Selesai', 'Moderator', 'Pembimbing 1', 'Pembimbing 2', 'Penguji 1', 'Penguji 2']
+            ['No', 'Ruang', 'Jam Mulai', 'Jam Selesai', 'NRP', 'Nama Mahasiswa', 'Judul', 'Moderator', 'Pembimbing 1', 'Pembimbing 2', 'Penguji 1', 'Penguji 2']
         ];
         
         items.forEach((item, index) => {
             detailData.push([
                 index + 1,
-                item.nrp,
-                item.nama_mahasiswa,
-                item.judul,
                 item.room,
                 item.jam_mulai,
                 item.jam_selesai,
+                item.nrp,
+                item.nama_mahasiswa,
+                item.judul,
                 item.moderator_nama || '-',
                 item.pembimbing_1_nama || '-',
                 item.pembimbing_2_nama || '-',

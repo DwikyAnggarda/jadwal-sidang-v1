@@ -15,7 +15,7 @@ interface Mahasiswa {
 interface Dosen {
   id: number;
   nama: string;
-  departemen: string;
+  nip: string;
 }
 interface FormValues {
   mahasiswa: string;

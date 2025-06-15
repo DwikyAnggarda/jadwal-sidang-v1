@@ -10,7 +10,7 @@ import EditDosenForm from './EditDosenForm';
 interface Dosen {
   id: number;
   nama: string;
-  departemen: string;
+  nip: string;
   no_hp: string;
 }
 
@@ -232,28 +232,96 @@ const DosenList: React.FC = () => {
             )}
           </DialogContent>
         </Dialog>
+
+        {/* Delete Dosen Dialog */}
+        <Dialog open={deleteDialogOpen} onOpenChange={(open) => {
+          setDeleteDialogOpen(open);
+          if (!open) {
+            setDosenToDelete(null);
+            setDeleteError(null);
+            setDeleteSuccess(null);
+            setDeleteLoading(false);
+          }
+        }}>
+          <DialogContent className="max-w-md w-full">
+            <DialogHeader>
+              <DialogTitle>Hapus Dosen</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <p>Apakah Anda yakin ingin menghapus dosen <strong>{dosenToDelete?.nama}</strong>?</p>
+              <p className="text-sm text-gray-600">Tindakan ini tidak dapat dibatalkan.</p>
+              
+              {deleteError && (
+                <Alert variant="destructive">
+                  <AlertTitle>Error</AlertTitle>
+                  <AlertDescription>{deleteError}</AlertDescription>
+                </Alert>
+              )}
+              
+              {deleteSuccess && (
+                <Alert>
+                  <AlertTitle>Sukses</AlertTitle>
+                  <AlertDescription>{deleteSuccess}</AlertDescription>
+                </Alert>
+              )}
+              
+              <div className="flex gap-2 justify-end">
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  onClick={() => setDeleteDialogOpen(false)} 
+                  disabled={deleteLoading}
+                >
+                  Batal
+                </Button>
+                <Button 
+                  type="button" 
+                  variant="destructive" 
+                  disabled={deleteLoading}
+                  onClick={async () => {
+                    if (!dosenToDelete) return;
+                    setDeleteLoading(true);
+                    setDeleteError(null);
+                    setDeleteSuccess(null);
+                    try {
+                      await api.delete(`/dosen/${dosenToDelete.id}`);
+                      setDeleteSuccess('Dosen berhasil dihapus');
+                      fetchDosen();
+                      setTimeout(() => {
+                        setDeleteDialogOpen(false);
+                        setDeleteSuccess(null);
+                      }, 1200);
+                    } catch (err: any) {
+                      setDeleteError(err.response?.data?.message || err.message);
+                    } finally {
+                      setDeleteLoading(false);
+                    }
+                  }}
+                >
+                  {deleteLoading ? 'Menghapus...' : 'Hapus'}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
       <div className="overflow-x-auto">
         <table className="min-w-full border bg-white rounded-lg text-sm">
           <thead className="bg-neutral-100">
             <tr>
               <th className="border px-3 py-2">Nama</th>
+              <th className="border px-3 py-2">NIP</th>
               <th className="border px-3 py-2">No. HP</th>
-              <th className="border px-3 py-2">Departemen</th>
-              <th className="border px-3 py-2">Bimbingan Saat Ini</th>
-              <th className="border px-3 py-2">Maksimal Bimbingan</th>
-              <th className="border px-3 py-2">Aksi</th>
+              <th className="border">Aksi</th>
             </tr>
           </thead>
           <tbody>
             {paginatedData.map((d) => (
               <tr key={d.id} className="hover:bg-neutral-50 transition">
                 <td className="border px-3 py-2 font-medium">{d.nama}</td>
+                <td className="border px-3 py-2">{d.nip}</td>
                 <td className="border px-3 py-2">{d.no_hp}</td>
-                <td className="border px-3 py-2">{d.departemen}</td>
-                <td className="border px-3 py-2">{(d as any).bimbingan_saat_ini ?? '-'}</td>
-                <td className="border px-3 py-2">{(d as any).maksimal_bimbingan ?? '-'}</td>
-                <td className="border px-3 py-2 flex gap-2">
+                <td className="border px-3 py-2 flex gap-1">
                   <Button size="sm" variant="outline" onClick={() => {
                     setSelectedDosen(d);
                     setEditDialogOpen(true);
