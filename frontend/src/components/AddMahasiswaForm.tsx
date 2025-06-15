@@ -10,7 +10,6 @@ import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 interface FormValues {
   nrp: string;
   nama: string;
-  departemen: string;
 }
 
 const AddMahasiswaForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) => {
@@ -22,7 +21,6 @@ const AddMahasiswaForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =>
     defaultValues: {
       nrp: '',
       nama: '',
-      departemen: '',
     },
   });
 
@@ -76,20 +74,6 @@ const AddMahasiswaForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =>
             render={({ field }) => (
               <FormItem>
                 <FormLabel>Nama Mahasiswa</FormLabel>
-                <FormControl>
-                  <Input type="text" {...field} required />
-                </FormControl>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-          <FormField
-            control={form.control}
-            name="departemen"
-            rules={{ required: 'Departemen wajib diisi' }}
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>Departemen</FormLabel>
                 <FormControl>
                   <Input type="text" {...field} required />
                 </FormControl>

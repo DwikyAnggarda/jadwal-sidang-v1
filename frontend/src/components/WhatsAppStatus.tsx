@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { CheckCircle, XCircle, RefreshCw, Send } from 'lucide-react';
 import { toast } from './ui/toast';
+import api from '../api/axios';
 
 interface WhatsAppStatus {
   success: boolean;
@@ -23,8 +24,8 @@ const WhatsAppStatusComponent: React.FC = () => {
   const checkStatus = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:5000/notifications/status');
-      const result = await response.json();
+      const response = await api.get('/notifications/status');
+      const result = response.data;
       setStatus(result);
     } catch (error) {
       console.error('Error checking WhatsApp status:', error);
@@ -46,18 +47,12 @@ const WhatsAppStatusComponent: React.FC = () => {
 
     setTestLoading(true);
     try {
-      const response = await fetch('http://localhost:5000/notifications/test', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          phone: testPhone,
-          message: testMessage
-        })
+      const response = await api.post('/notifications/test', {
+        phone: testPhone,
+        message: testMessage
       });
 
-      const result = await response.json();
+      const result = response.data;
 
       if (result.success) {
         toast.success('Pesan test berhasil dikirim!');

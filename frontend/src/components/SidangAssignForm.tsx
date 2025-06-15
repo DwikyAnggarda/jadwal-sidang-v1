@@ -11,7 +11,6 @@ import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 interface Mahasiswa {
   id: number;
   nama: string;
-  departemen: string;
 }
 interface FormValues {
   mahasiswa: string;
@@ -87,7 +86,7 @@ const SidangAssignForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }) =>
                     </SelectTrigger>
                     <SelectContent>
                       {mahasiswaList.map(m => (
-                        <SelectItem key={m.id} value={String(m.id)}>{m.nama} ({m.departemen})</SelectItem>
+                        <SelectItem key={m.id} value={String(m.id)}>{m.nama}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>

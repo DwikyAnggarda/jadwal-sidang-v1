@@ -10,9 +10,16 @@ const axios = require('axios');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
 
+// Import authentication middleware and routes
+const { authenticateToken } = require('./middleware/auth');
+const authRoutes = require('./routes/auth');
+
 const app = express();
 app.use(cors());
 app.use(express.json());
+
+// Authentication routes (unprotected)
+app.use('/auth', authRoutes);
 
 // =================== WHATSAPP CLIENT INITIALIZATION ===================
 let qrCodeString = ""; // Store QR Code temporarily
@@ -64,7 +71,7 @@ initializeWhatsApp();
 
 // =================== RULE CRUD API ===================
 // GET all rules
-app.get('/rule', async (req, res) => {
+app.get('/rule', authenticateToken, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM rule ORDER BY id ASC');
         res.json(result.rows);
@@ -75,7 +82,7 @@ app.get('/rule', async (req, res) => {
 });
 
 // GET rule by id (optional, for edit form)
-app.get('/rule/:id', async (req, res) => {
+app.get('/rule/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     try {
         const result = await pool.query('SELECT * FROM rule WHERE id = $1', [id]);
@@ -90,7 +97,7 @@ app.get('/rule/:id', async (req, res) => {
 });
 
 // CREATE rule
-app.post('/rule', async (req, res) => {
+app.post('/rule', authenticateToken, async (req, res) => {
     const { jenis_sidang, durasi_sidang, jumlah_sesi } = req.body;
     if (!jenis_sidang || !durasi_sidang || !jumlah_sesi) {
         return res.status(400).json({ success: false, message: 'Field jenis_sidang, durasi_sidang, jumlah_sesi wajib diisi' });
@@ -116,7 +123,7 @@ app.post('/rule', async (req, res) => {
 });
 
 // UPDATE rule
-app.put('/rule/:id', async (req, res) => {
+app.put('/rule/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const { jenis_sidang, durasi_sidang, jumlah_sesi } = req.body;
     if (!jenis_sidang || !durasi_sidang || !jumlah_sesi) {
@@ -146,7 +153,7 @@ app.put('/rule/:id', async (req, res) => {
 });
 
 // DELETE rule
-app.delete('/rule/:id', async (req, res) => {
+app.delete('/rule/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     try {
         const result = await pool.query('DELETE FROM rule WHERE id = $1 RETURNING *', [id]);
@@ -161,7 +168,7 @@ app.delete('/rule/:id', async (req, res) => {
 });
 
 // Endpoint untuk mendapatkan daftar dosen
-app.get('/dosen', async (req, res) => {
+app.get('/dosen', authenticateToken, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM dosen ORDER BY nama ASC');
         res.json(result.rows);
@@ -172,7 +179,7 @@ app.get('/dosen', async (req, res) => {
 });
 
 // Endpoint untuk mendapatkan daftar mahasiswa
-app.get('/mahasiswa', async (req, res) => {
+app.get('/mahasiswa', authenticateToken, async (req, res) => {
     try {
         const { without_pembimbing, with_pembimbing, without_sidang, page = 1, limit = 10 } = req.query;
         let query = `
@@ -225,7 +232,7 @@ app.get('/mahasiswa', async (req, res) => {
 });
 
 // Endpoint untuk menambahkan dosen
-app.post('/dosen', async (req, res) => {
+app.post('/dosen', authenticateToken, async (req, res) => {
     const { nama, departemen, no_hp } = req.body;
     try {
         const result = await pool.query(
@@ -240,7 +247,7 @@ app.post('/dosen', async (req, res) => {
 });
 
 // Endpoint untuk mengupdate data dosen
-app.put('/dosen/:id', async (req, res) => {
+app.put('/dosen/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     const { nama, departemen, no_hp } = req.body;
     if (!nama || !departemen || !no_hp) {
@@ -262,7 +269,7 @@ app.put('/dosen/:id', async (req, res) => {
 });
 
 // Endpoint untuk menghapus dosen
-app.delete('/dosen/:id', async (req, res) => {
+app.delete('/dosen/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     try {
         const result = await pool.query('DELETE FROM dosen WHERE id = $1 RETURNING *', [id]);
@@ -281,7 +288,7 @@ app.delete('/dosen/:id', async (req, res) => {
 });
 
 // Endpoint untuk export data dosen ke Excel
-app.get('/dosen/export', async (req, res) => {
+app.get('/dosen/export', authenticateToken, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM dosen ORDER BY nama ASC');
         const dosenRows = result.rows;
@@ -313,7 +320,7 @@ app.get('/dosen/export', async (req, res) => {
 });
 
 // Endpoint untuk download template Excel dosen
-app.get('/dosen/template', (req, res) => {
+app.get('/dosen/template', authenticateToken, (req, res) => {
     const workbook = xlsx.utils.book_new();
     const wsData = [
         ['Nama', 'Departemen', 'No HP', 'Maksimal Bimbingan'],
@@ -328,7 +335,7 @@ app.get('/dosen/template', (req, res) => {
 });
 
 // Endpoint untuk import data dosen dari Excel
-app.post('/dosen/import', upload.single('file'), async (req, res) => {
+app.post('/dosen/import', authenticateToken, upload.single('file'), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ success: false, message: 'File Excel diperlukan' });
     }
@@ -382,10 +389,10 @@ app.post('/dosen/import', upload.single('file'), async (req, res) => {
 });
 
 // Endpoint untuk menambahkan mahasiswa (dengan NRP wajib unik)
-app.post('/mahasiswa', async (req, res) => {
-    const { nrp, nama, departemen } = req.body;
-    if (!nrp || !nama || !departemen) {
-        return res.status(400).json({ success: false, message: 'Field nrp, nama, dan departemen wajib diisi' });
+app.post('/mahasiswa', authenticateToken, async (req, res) => {
+    const { nrp, nama } = req.body;
+    if (!nrp || !nama) {
+        return res.status(400).json({ success: false, message: 'Field nrp dan nama wajib diisi' });
     }
     try {
         // Cek NRP unik
@@ -394,8 +401,8 @@ app.post('/mahasiswa', async (req, res) => {
             return res.status(400).json({ success: false, message: 'NRP sudah digunakan oleh mahasiswa lain' });
         }
         const result = await pool.query(
-            'INSERT INTO mahasiswa (nrp, nama, departemen) VALUES ($1, $2, $3) RETURNING *',
-            [nrp, nama, departemen]
+            'INSERT INTO mahasiswa (nrp, nama) VALUES ($1, $2) RETURNING *',
+            [nrp, nama]
         );
         res.json({ success: true, data: result.rows[0] });
     } catch (err) {
@@ -404,12 +411,12 @@ app.post('/mahasiswa', async (req, res) => {
     }
 });
 
-// Endpoint untuk update data mahasiswa (nama, departemen, nrp)
-app.put('/mahasiswa/:id', async (req, res) => {
+// Endpoint untuk update data mahasiswa (nama, nrp)
+app.put('/mahasiswa/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
-    const { nrp, nama, departemen } = req.body;
-    if (!nrp || !nama || !departemen) {
-        return res.status(400).json({ success: false, message: 'Field nrp, nama, dan departemen wajib diisi' });
+    const { nrp, nama } = req.body;
+    if (!nrp || !nama) {
+        return res.status(400).json({ success: false, message: 'Field nrp dan nama wajib diisi' });
     }
     try {
         // Cek NRP unik (kecuali milik sendiri)
@@ -418,8 +425,8 @@ app.put('/mahasiswa/:id', async (req, res) => {
             return res.status(400).json({ success: false, message: 'NRP sudah digunakan oleh mahasiswa lain' });
         }
         const result = await pool.query(
-            'UPDATE mahasiswa SET nrp = $1, nama = $2, departemen = $3 WHERE id = $4 RETURNING *',
-            [nrp, nama, departemen, id]
+            'UPDATE mahasiswa SET nrp = $1, nama = $2 WHERE id = $3 RETURNING *',
+            [nrp, nama, id]
         );
         if (result.rows.length === 0) {
             return res.status(404).json({ success: false, message: 'Mahasiswa tidak ditemukan' });
@@ -432,7 +439,7 @@ app.put('/mahasiswa/:id', async (req, res) => {
 });
 
 // Endpoint untuk menghapus mahasiswa
-app.delete('/mahasiswa/:id', async (req, res) => {
+app.delete('/mahasiswa/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     try {
         const result = await pool.query('DELETE FROM mahasiswa WHERE id = $1 RETURNING *', [id]);
@@ -451,20 +458,19 @@ app.delete('/mahasiswa/:id', async (req, res) => {
 });
 
 // Endpoint untuk export data mahasiswa ke Excel
-app.get('/mahasiswa/export', async (req, res) => {
+app.get('/mahasiswa/export', authenticateToken, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM mahasiswa ORDER BY nama ASC');
         const mahasiswaRows = result.rows;
         // Header kolom
         const wsData = [
-            ['NRP', 'Nama', 'Departemen']
+            ['NRP', 'Nama']
         ];
         // Data
         mahasiswaRows.forEach(m => {
             wsData.push([
                 m.nrp,
-                m.nama,
-                m.departemen
+                m.nama
             ]);
         });
         const workbook = xlsx.utils.book_new();
@@ -480,11 +486,11 @@ app.get('/mahasiswa/export', async (req, res) => {
     }
 });
 // Endpoint untuk download template Excel mahasiswa
-app.get('/mahasiswa/template', (req, res) => {
+app.get('/mahasiswa/template', authenticateToken, (req, res) => {
     const workbook = xlsx.utils.book_new();
     const wsData = [
-        ['NRP', 'Nama', 'Departemen'],
-        ['Contoh: 05111940000001', 'Nama Mahasiswa', 'Teknik Informatika']
+        ['NRP', 'Nama'],
+        ['Contoh: 05111940000001', 'Nama Mahasiswa']
     ];
     const worksheet = xlsx.utils.aoa_to_sheet(wsData);
     xlsx.utils.book_append_sheet(workbook, worksheet, 'TemplateMahasiswa');
@@ -495,15 +501,34 @@ app.get('/mahasiswa/template', (req, res) => {
 });
 
 // Endpoint untuk import data mahasiswa dari Excel
-app.post('/mahasiswa/import', upload.single('file'), async (req, res) => {
+app.post('/mahasiswa/import', authenticateToken, upload.single('file'), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ success: false, message: 'File Excel diperlukan' });
     }
     let mahasiswaList;
+    let workbook;
     try {
-        const workbook = xlsx.readFile(req.file.path);
+        workbook = xlsx.readFile(req.file.path);
         const sheetName = workbook.SheetNames[0];
         const sheet = workbook.Sheets[sheetName];
+        
+        // Validasi header Excel file
+        const allData = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        if (allData.length > 0) {
+            const headers = allData[0];
+            const expectedHeaders = ['NRP', 'Nama'];
+            const headersValid = expectedHeaders.every((header, index) => 
+                headers[index] && headers[index].toString().trim().toLowerCase() === header.toLowerCase()
+            );
+            if (!headersValid) {
+                fs.unlinkSync(req.file.path);
+                return res.status(400).json({ 
+                    success: false, 
+                    message: `Header Excel tidak sesuai template. Expected: ${expectedHeaders.join(', ')}` 
+                });
+            }
+        }
+        
         mahasiswaList = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
         // Remove header and example row
         mahasiswaList = mahasiswaList.slice(1).filter(row => row[0]);
@@ -513,16 +538,17 @@ app.post('/mahasiswa/import', upload.single('file'), async (req, res) => {
     }
     fs.unlinkSync(req.file.path);
 
-    // Format: [NRP, Nama, Departemen]
+    // Format: [NRP, Nama]
     if (!mahasiswaList.length) {
         return res.status(400).json({ success: false, message: 'Data mahasiswa kosong di file' });
     }
+    
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
         for (const row of mahasiswaList) {
-            const [nrp, nama, departemen] = row;
-            if (!nrp || !nama || !departemen) {
+            const [nrp, nama] = row;
+            if (!nrp || !nama) {
                 await client.query('ROLLBACK');
                 return res.status(400).json({ success: false, message: `Data tidak lengkap pada baris: ${JSON.stringify(row)}` });
             }
@@ -533,8 +559,8 @@ app.post('/mahasiswa/import', upload.single('file'), async (req, res) => {
                 return res.status(400).json({ success: false, message: `Mahasiswa dengan NRP "${nrp}" sudah ada di database.` });
             }
             await client.query(
-                'INSERT INTO mahasiswa (nrp, nama, departemen) VALUES ($1, $2, $3)',
-                [nrp, nama, departemen]
+                'INSERT INTO mahasiswa (nrp, nama) VALUES ($1, $2)',
+                [nrp, nama]
             );
         }
         await client.query('COMMIT');
@@ -549,7 +575,7 @@ app.post('/mahasiswa/import', upload.single('file'), async (req, res) => {
 });
 
 // Endpoint untuk mengotomatisasi penentuan dosen dan jadwal sidang
-app.post('/sidang/assign', async (req, res) => {
+app.post('/sidang/assign', authenticateToken, async (req, res) => {
     const { mahasiswa_id, tanggal_sidang, jam_mulai_sidang, durasi_sidang, room } = req.body;
 
     if (!mahasiswa_id || !tanggal_sidang || !jam_mulai_sidang || !durasi_sidang || !room) {
@@ -657,7 +683,7 @@ app.post('/sidang/assign', async (req, res) => {
 });
 
 // Endpoint untuk menugaskan pembimbing
-app.post('/pembimbing/assign', async (req, res) => {
+app.post('/pembimbing/assign', authenticateToken, async (req, res) => {
     const { mahasiswa_id, pembimbing_1_id, pembimbing_2_id } = req.body;
     try {
         const mahasiswaResult = await pool.query('SELECT pembimbing_1_id, pembimbing_2_id FROM mahasiswa WHERE id = $1', [mahasiswa_id]);
@@ -704,10 +730,10 @@ app.post('/pembimbing/assign', async (req, res) => {
 });
 
 // Endpoint untuk mendapatkan daftar sidang
-app.get('/sidang', async (req, res) => {
+app.get('/sidang', authenticateToken, async (req, res) => {
     try {
         let query = `
-            SELECT s.id, s.mahasiswa_id, m.nama as mahasiswa_nama, m.departemen as mahasiswa_departemen,
+            SELECT s.id, s.mahasiswa_id, m.nama as mahasiswa_nama,
                s.pembimbing_1_id, d1.nama as pembimbing_1_nama,
                s.pembimbing_2_id, d2.nama as pembimbing_2_nama,
                s.penguji_1_id, d3.nama as penguji_1_nama,
@@ -747,7 +773,7 @@ app.get('/sidang', async (req, res) => {
 });
 
 // Endpoint batch assign jadwal sidang
-app.post('/sidang/batch-assign', upload.single('file'), async (req, res) => {
+app.post('/sidang/batch-assign', authenticateToken, upload.single('file'), async (req, res) => {
     const { tanggal_sidang, jam_mulai_sidang, durasi_sidang } = req.body;
     if (!tanggal_sidang || !jam_mulai_sidang || !durasi_sidang || !req.file) {
         return res.status(400).json({ success: false, message: 'Field tanggal_sidang, jam_mulai_sidang, durasi_sidang, dan file diperlukan' });
@@ -949,7 +975,7 @@ app.post('/sidang/batch-assign', upload.single('file'), async (req, res) => {
 });
 
 // Endpoint untuk download template Excel jadwal sidang
-app.get('/moderator/template', (req, res) => {
+app.get('/moderator/template', authenticateToken, (req, res) => {
     const workbook = xlsx.utils.book_new();
     const wsData = [
         ['NRP', 'Nama', 'Judul', 'Pembimbing 1', 'Pembimbing 2'],
@@ -965,7 +991,7 @@ app.get('/moderator/template', (req, res) => {
 });
 
 // Endpoint untuk penjadwalan moderator sidang otomatis (OLD - replaced by /sidang/moderator/assign)
-app.post('/moderator/assign', upload.single('file'), async (req, res) => {
+app.post('/moderator/assign', authenticateToken, upload.single('file'), async (req, res) => {
 
     let { tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang } = req.body;
     if (!jenis_sidang) jenis_sidang = 'Skripsi';
@@ -1533,7 +1559,7 @@ app.post('/moderator/assign', upload.single('file'), async (req, res) => {
 });
 
 // Endpoint untuk mendapatkan daftar sidang_group
-app.get('/sidang-group', async (req, res) => {
+app.get('/sidang-group', authenticateToken, async (req, res) => {
     try {
         const query = `
             SELECT 
@@ -1572,7 +1598,7 @@ app.get('/sidang-group', async (req, res) => {
 });
 
 // Endpoint untuk mendapatkan detail sidang_item berdasarkan sidang_group_id
-app.get('/sidang-group/:id/detail', async (req, res) => {
+app.get('/sidang-group/:id/detail', authenticateToken, async (req, res) => {
     const { id } = req.params;
     
     try {
@@ -1645,7 +1671,7 @@ app.get('/sidang-group/:id/detail', async (req, res) => {
 });
 
 // Endpoint untuk menghapus sidang_group dan sidang_item terkait
-app.delete('/sidang/:id', async (req, res) => {
+app.delete('/sidang/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
     
     try {
@@ -1672,7 +1698,7 @@ app.delete('/sidang/:id', async (req, res) => {
 });
 
 // Endpoint untuk export semua sidang grup ke Excel
-app.get('/sidang-group/export', async (req, res) => {
+app.get('/sidang-group/export', authenticateToken, async (req, res) => {
     try {
         // Ambil data sidang grup dengan statistik
         const groupQuery = `
@@ -1806,7 +1832,7 @@ app.get('/sidang-group/export', async (req, res) => {
 });
 
 // Endpoint untuk export sidang grup tertentu ke Excel
-app.get('/sidang-group/:id/export', async (req, res) => {
+app.get('/sidang-group/:id/export', authenticateToken, async (req, res) => {
     const { id } = req.params;
     
     try {
@@ -2024,7 +2050,7 @@ function delay(ms) {
 // =================== WHATSAPP NOTIFICATION API ENDPOINTS ===================
 
 // Send notification to all dosen in a sidang
-app.post('/notifications/sidang/:sidangId', async (req, res) => {
+app.post('/notifications/sidang/:sidangId', authenticateToken, async (req, res) => {
     const { sidangId } = req.params;
     
     try {
@@ -2147,7 +2173,7 @@ app.post('/notifications/sidang/:sidangId', async (req, res) => {
 });
 
 // Send batch notifications for all sidang in a group
-app.post('/notifications/group/:groupId', async (req, res) => {
+app.post('/notifications/group/:groupId', authenticateToken, async (req, res) => {
     const { groupId } = req.params;
     
     try {
@@ -2346,7 +2372,7 @@ app.get("/whatsapp/status", (req, res) => {
 });
 
 // Get WhatsApp service status
-app.get('/notifications/status', async (req, res) => {
+app.get('/notifications/status', authenticateToken, async (req, res) => {
     res.json({
         success: true,
         whatsapp_service: isWhatsAppReady ? 'connected' : 'disconnected',
@@ -2358,7 +2384,7 @@ app.get('/notifications/status', async (req, res) => {
 });
 
 // Test single notification endpoint
-app.post('/notifications/test', async (req, res) => {
+app.post('/notifications/test', authenticateToken, async (req, res) => {
     const { phone, message } = req.body;
     
     if (!phone || !message) {

@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Badge } from '../components/ui/badge';
 import { ArrowLeft, Clock, Calendar, Users, Download, MessageCircle, Send } from 'lucide-react';
 import { toast } from '../components/ui/toast';
+import api from '../api/axios';
 
 interface SidangItem {
   id: number;
@@ -51,17 +52,13 @@ const SidangGroupDetailPage: React.FC = () => {
     if (!id) return;
     
     try {
-      const response = await fetch(`http://localhost:5000/sidang-group/${id}/detail`);
-      if (response.ok) {
-        const result = await response.json();
-        setData(result);
-      } else {
-        const error = await response.json();
-        toast.error(error.message || 'Gagal mengambil data detail');
-      }
-    } catch (error) {
+      setLoading(true);
+      const response = await api.get<DetailResponse>(`/sidang-group/${id}/detail`);
+      setData(response.data);
+    } catch (error: any) {
       console.error('Error fetching detail:', error);
-      toast.error('Terjadi kesalahan saat mengambil data');
+      const errorMessage = error.response?.data?.message || 'Terjadi kesalahan saat mengambil data';
+      toast.error(errorMessage);
     } finally {
       setLoading(false);
     }
@@ -98,35 +95,32 @@ const SidangGroupDetailPage: React.FC = () => {
     
     setExportLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/sidang-group/${id}/export`, {
-        method: 'GET',
+      const response = await api.get(`/sidang-group/${id}/export`, {
+        responseType: 'blob'
       });
       
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        
-        // Extract filename from response header or use default
-        const contentDisposition = response.headers.get('content-disposition');
-        const filename = contentDisposition 
-          ? contentDisposition.split('filename=')[1]?.replace(/"/g, '')
-          : `sidang_grup_${id}.xlsx`;
-        
-        link.setAttribute('download', filename);
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        window.URL.revokeObjectURL(url);
-        
-        toast.success('File Excel berhasil diunduh');
-      } else {
-        toast.error('Gagal mengunduh file Excel');
-      }
-    } catch (error) {
+      const blob = response.data;
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Extract filename from response header or use default
+      const contentDisposition = response.headers['content-disposition'];
+      const filename = contentDisposition 
+        ? contentDisposition.split('filename=')[1]?.replace(/"/g, '')
+        : `sidang_grup_${id}.xlsx`;
+      
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+      toast.success('File Excel berhasil diunduh');
+    } catch (error: any) {
       console.error('Error exporting:', error);
-      toast.error('Terjadi kesalahan saat mengunduh file');
+      const errorMessage = error.response?.data?.message || 'Terjadi kesalahan saat mengunduh file';
+      toast.error(errorMessage);
     } finally {
       setExportLoading(false);
     }
@@ -138,24 +132,18 @@ const SidangGroupDetailPage: React.FC = () => {
     
     setNotificationLoading(true);
     try {
-      const response = await fetch(`http://localhost:5000/notifications/group/${id}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
+      const response = await api.post(`/notifications/group/${id}`);
       
-      const result = await response.json();
-      
-      if (result.success) {
-        const { summary } = result;
+      if (response.data.success) {
+        const { summary } = response.data;
         toast.success(`Notifikasi berhasil dikirim: ${summary.sent} berhasil, ${summary.failed} gagal dari ${summary.total_notifications} total`);
       } else {
-        toast.error(result.message || 'Gagal mengirim notifikasi');
+        toast.error(response.data.message || 'Gagal mengirim notifikasi');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error sending notifications:', error);
-      toast.error('Terjadi kesalahan saat mengirim notifikasi');
+      const errorMessage = error.response?.data?.message || 'Terjadi kesalahan saat mengirim notifikasi';
+      toast.error(errorMessage);
     } finally {
       setNotificationLoading(false);
     }
@@ -315,24 +303,18 @@ const SidangGroupDetailPage: React.FC = () => {
                           onClick={async () => {
                             setNotificationLoading(true);
                             try {
-                              const response = await fetch(`http://localhost:5000/notifications/sidang/${item.id}`, {
-                                method: 'POST',
-                                headers: {
-                                  'Content-Type': 'application/json'
-                                }
-                              });
+                              const response = await api.post(`/notifications/sidang/${item.id}`);
                               
-                              const result = await response.json();
-                              
-                              if (result.success) {
-                                const { summary } = result;
+                              if (response.data.success) {
+                                const { summary } = response.data;
                                 toast.success(`Notifikasi untuk ${item.nama_mahasiswa}: ${summary.sent} berhasil, ${summary.failed} gagal`);
                               } else {
-                                toast.error(result.message || 'Gagal mengirim notifikasi');
+                                toast.error(response.data.message || 'Gagal mengirim notifikasi');
                               }
-                            } catch (error) {
+                            } catch (error: any) {
                               console.error('Error sending notification:', error);
-                              toast.error('Terjadi kesalahan saat mengirim notifikasi');
+                              const errorMessage = error.response?.data?.message || 'Terjadi kesalahan saat mengirim notifikasi';
+                              toast.error(errorMessage);
                             } finally {
                               setNotificationLoading(false);
                             }

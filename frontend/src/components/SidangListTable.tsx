@@ -9,7 +9,6 @@ import { toast } from './ui/toast';
 interface Sidang {
   id: number;
   mahasiswa_nama: string;
-  mahasiswa_departemen: string;
   pembimbing_1_nama: string;
   pembimbing_2_nama: string;
   penguji_1_nama: string;
@@ -40,14 +39,9 @@ const SidangList: React.FC = () => {
   const handleSendNotification = async (sidangId: number, mahasiswaName: string) => {
     setNotificationLoading(sidangId);
     try {
-      const response = await fetch(`http://localhost:5000/notifications/sidang/${sidangId}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
+      const response = await api.post(`/notifications/sidang/${sidangId}`);
       
-      const result = await response.json();
+      const result = response.data;
       
       if (result.success) {
         const { summary } = result;
@@ -82,7 +76,6 @@ const SidangList: React.FC = () => {
               <th className="border px-1 py-2">Ruangan</th>
               <th className="border px-10 py-2">Waktu</th>
               <th className="border px-3 py-2">Nama Mahasiswa</th>
-              <th className="border px-3 py-2">Departemen</th>
               <th className="border px-3 py-2">Moderator</th>
               <th className="border px-3 py-2">Pembimbing 1</th>
               <th className="border px-3 py-2">Pembimbing 2</th>
@@ -99,7 +92,6 @@ const SidangList: React.FC = () => {
                 <td className="border px-3 py-2">{s.room}</td>
                 <td className="border px-3 py-2">{s.jam_mulai_final + ' - ' + s.jam_selesai_final}</td>
                 <td className="border px-3 py-2 font-medium">{s.mahasiswa_nama}</td>
-                <td className="border px-3 py-2">{s.mahasiswa_departemen}</td>
                 <td className="border px-3 py-2">{s.moderator_nama}</td>
                 <td className="border px-3 py-2">{s.pembimbing_1_nama}</td>
                 <td className="border px-3 py-2">{s.pembimbing_2_nama}</td>

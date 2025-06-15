@@ -11,7 +11,6 @@ import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 interface Mahasiswa {
   id: number;
   nama: string;
-  departemen: string;
 }
 interface Dosen {
   id: number;
@@ -83,7 +82,7 @@ const AssignPembimbingForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }
                     </SelectTrigger>
                     <SelectContent>
                       {mahasiswaList.map(m => (
-                        <SelectItem key={m.id} value={String(m.id)}>{m.nama} ({m.departemen})</SelectItem>
+                        <SelectItem key={m.id} value={String(m.id)}>{m.nama}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -106,7 +105,7 @@ const AssignPembimbingForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }
                     </SelectTrigger>
                     <SelectContent>
                       {dosenList.map(d => (
-                        <SelectItem key={d.id} value={String(d.id)}>{d.nama} ({d.departemen})</SelectItem>
+                        <SelectItem key={d.id} value={String(d.id)}>{d.nama}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -129,7 +128,7 @@ const AssignPembimbingForm: React.FC<{ onSuccess: () => void }> = ({ onSuccess }
                     </SelectTrigger>
                     <SelectContent>
                       {dosenList.map(d => (
-                        <SelectItem key={d.id} value={String(d.id)}>{d.nama} ({d.departemen})</SelectItem>
+                        <SelectItem key={d.id} value={String(d.id)}>{d.nama}</SelectItem>
                       ))}
                     </SelectContent>
                   </Select>

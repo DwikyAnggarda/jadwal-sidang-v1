@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Input } from './ui/input';
 // Import Mahasiswa Excel Modal
 const ImportMahasiswaDialog: React.FC<{ open: boolean; onOpenChange: (open: boolean) => void; onSuccess: () => void; }> = ({ open, onOpenChange, onSuccess }) => {
@@ -54,7 +54,7 @@ const ImportMahasiswaDialog: React.FC<{ open: boolean; onOpenChange: (open: bool
           <Input type="file" accept=".xlsx,.xls" onChange={handleFileChange} ref={inputRef} disabled={loading} />
           <div className="text-xs text-neutral-500">File harus format Excel sesuai template.</div>
           {error && <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
-          {success && <Alert variant="success"><AlertTitle>Sukses</AlertTitle><AlertDescription>{success}</AlertDescription></Alert>}
+          {success && <Alert><AlertTitle>Sukses</AlertTitle><AlertDescription>{success}</AlertDescription></Alert>}
         </div>
         <div className="flex justify-end gap-2 mt-4">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>Batal</Button>
@@ -69,7 +69,6 @@ import { Card } from './ui/card';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 import { Button } from './ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Checkbox } from './ui/checkbox';
 import { Label } from './ui/label';
 import AddMahasiswaForm from './AddMahasiswaForm';
@@ -79,13 +78,11 @@ interface Mahasiswa {
   id: number;
   nrp?: string;
   nama: string;
-  departemen: string;
   pembimbing_1_nama?: string | null;
   pembimbing_2_nama?: string | null;
 }
 
 interface Filters {
-  departemen: string;
   with_pembimbing: boolean;
   without_pembimbing: boolean;
 }
@@ -96,7 +93,6 @@ const MahasiswaList: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [filters, setFilters] = useState<Filters>({
-    departemen: '',
     with_pembimbing: false,
     without_pembimbing: false,
   });
@@ -198,7 +194,6 @@ const MahasiswaList: React.FC = () => {
     setError(null);
     try {
       const params = new URLSearchParams();
-      if (filters.departemen) params.append('departemen', filters.departemen);
       if (filters.with_pembimbing) params.append('with_pembimbing', 'true');
       if (filters.without_pembimbing) params.append('without_pembimbing', 'true');
       params.append('page', String(currentPage));
@@ -217,11 +212,6 @@ const MahasiswaList: React.FC = () => {
     fetchMahasiswa();
     // eslint-disable-next-line
   }, [filters, currentPage, itemsPerPage]); // Refetch when filters or page/limit change
-
-  // For departemen filter, fetch from current data (could be optimized)
-  const uniqueDepartemen = useMemo(() => {
-    return [...new Set(data.map(m => m.departemen))];
-  }, [data]);
 
   const handleFilterChange = (key: keyof Filters, value: string | boolean) => {
     setFilters(prev => ({
@@ -280,21 +270,7 @@ const MahasiswaList: React.FC = () => {
       {/* Import Mahasiswa Dialog */}
       <ImportMahasiswaDialog open={importOpen} onOpenChange={setImportOpen} onSuccess={fetchMahasiswa} />
 
-        <div className="flex items-center gap-4">
-          <Select
-            value={filters.departemen}
-            onValueChange={(value) => handleFilterChange('departemen', value === 'all' ? '' : value)}
-          >
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Filter Departemen" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Semua Departemen</SelectItem>
-              {uniqueDepartemen.map(dep => (
-                <SelectItem key={dep} value={dep}>{dep}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        {/* <div className="flex items-center gap-4">
           <div className="flex items-center space-x-2">
             <Checkbox
               id="with_pembimbing"
@@ -311,11 +287,11 @@ const MahasiswaList: React.FC = () => {
             />
             <Label htmlFor="without_pembimbing">Tanpa Pembimbing</Label>
           </div>
-        </div>
+        </div> */}
       </div>
 
       {editSuccessMsg && (
-        <Alert className="mb-4" variant="success">
+        <Alert className="mb-4">
           <AlertTitle>Sukses</AlertTitle>
           <AlertDescription>{editSuccessMsg}</AlertDescription>
         </Alert>
@@ -348,9 +324,8 @@ const MahasiswaList: React.FC = () => {
             <tr>
               <th className="border px-3 py-2">NRP</th>
               <th className="border px-3 py-2">Nama</th>
-              <th className="border px-3 py-2">Departemen</th>
-              <th className="border px-3 py-2">Pembimbing 1</th>
-              <th className="border px-3 py-2">Pembimbing 2</th>
+              {/* <th className="border px-3 py-2">Pembimbing 1</th> */}
+              {/* <th className="border px-3 py-2">Pembimbing 2</th> */}
               <th className="border px-3 py-2">Aksi</th>
             </tr>
           </thead>
@@ -359,9 +334,8 @@ const MahasiswaList: React.FC = () => {
               <tr key={m.id} className="hover:bg-neutral-50 dark:hover:bg-neutral-800 transition">
                 <td className="border px-3 py-2 font-mono">{m.nrp || '-'}</td>
                 <td className="border px-3 py-2 font-medium">{m.nama}</td>
-                <td className="border px-3 py-2">{m.departemen}</td>
-                <td className="border px-3 py-2">{m.pembimbing_1_nama || '-'}</td>
-                <td className="border px-3 py-2">{m.pembimbing_2_nama || '-'}</td>
+                {/* <td className="border px-3 py-2">{m.pembimbing_1_nama || '-'}</td>
+                <td className="border px-3 py-2">{m.pembimbing_2_nama || '-'}</td> */}
                 <td className="border px-3 py-2 flex gap-2">
                   <Button size="sm" variant="outline" onClick={() => handleEditClick(m)}>
                     Edit
@@ -374,7 +348,7 @@ const MahasiswaList: React.FC = () => {
             ))}
             {data.length === 0 && !loading && (
               <tr>
-                <td colSpan={6} className="text-center py-4 border">Tidak ada data mahasiswa ditemukan.</td>
+                <td colSpan={5} className="text-center py-4 border">Tidak ada data mahasiswa ditemukan.</td>
               </tr>
             )}
           </tbody>

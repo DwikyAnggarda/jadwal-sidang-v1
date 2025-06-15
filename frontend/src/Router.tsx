@@ -10,11 +10,18 @@ import GenerateJadwalSidangPage from './pages/GenerateJadwalSidangPage';
 import RuleListPage from './pages/RuleListPage';
 import WhatsAppStatusPage from './pages/WhatsAppStatusPage';
 import WhatsAppSetupPage from './pages/WhatsAppSetupPage';
+import LoginPage from './pages/LoginPage';
+import ProtectedRoute from './components/ProtectedRoute';
 import App from './App';
 
 const Router = () => (
   <Routes>
-    <Route path="/" element={<App />}>
+    <Route path="/login" element={<LoginPage />} />
+    <Route path="/" element={
+      <ProtectedRoute>
+        <App />
+      </ProtectedRoute>
+    }>
       <Route index element={<Navigate to="/dosen" replace />} />
       <Route path="dosen" element={<DosenListPage />} />
       <Route path="mahasiswa" element={<MahasiswaListPage />} />

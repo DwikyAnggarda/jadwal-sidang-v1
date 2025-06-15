@@ -1,15 +1,13 @@
 import axios from 'axios';
 
-const api = axios.create({
-  baseURL: 'http://localhost:5000', // Ganti jika backend beda host/port
-  headers: {
-    'Content-Type': 'application/json',
-  },
+// Create axios instance
+const apiClient = axios.create({
+  baseURL: 'http://localhost:5000',
   timeout: 10000,
 });
 
 // Request interceptor to add JWT token
-api.interceptors.request.use(
+apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
     if (token) {
@@ -23,21 +21,16 @@ api.interceptors.request.use(
 );
 
 // Response interceptor to handle token expiration
-api.interceptors.response.use(
+apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401 || error.response?.status === 403) {
       // Token expired or invalid
       localStorage.removeItem('token');
-      localStorage.removeItem('user');
-      
-      // Only redirect if not already on login page
-      if (window.location.pathname !== '/login') {
-        window.location.href = '/login';
-      }
+      window.location.href = '/login';
     }
     return Promise.reject(error);
   }
 );
 
-export default api;
+export default apiClient;

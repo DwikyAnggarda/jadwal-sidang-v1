@@ -5,7 +5,6 @@ interface Mahasiswa {
   id: number;
   nrp: string;
   nama: string;
-  departemen: string;
 }
 
 interface EditMahasiswaFormProps {
@@ -17,20 +16,19 @@ interface EditMahasiswaFormProps {
 const EditMahasiswaForm: React.FC<EditMahasiswaFormProps> = ({ mahasiswa, onSuccess, onCancel }) => {
   const [nrp, setNrp] = useState(mahasiswa.nrp);
   const [nama, setNama] = useState(mahasiswa.nama);
-  const [departemen, setDepartemen] = useState(mahasiswa.departemen);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    if (!nrp.trim() || !nama.trim() || !departemen.trim()) {
+    if (!nrp.trim() || !nama.trim()) {
       setError('Semua field wajib diisi.');
       return;
     }
     setLoading(true);
     try {
-      const res = await api.put(`/mahasiswa/${mahasiswa.id}`, { nrp, nama, departemen });
+      const res = await api.put(`/mahasiswa/${mahasiswa.id}`, { nrp, nama });
       if (res.data && res.data.success) {
         onSuccess(res.data.data);
       } else {
@@ -65,16 +63,6 @@ const EditMahasiswaForm: React.FC<EditMahasiswaFormProps> = ({ mahasiswa, onSucc
           type="text"
           value={nama}
           onChange={e => setNama(e.target.value)}
-          className="border rounded px-2 py-1 w-full"
-          disabled={loading}
-        />
-      </div>
-      <div>
-        <label className="block font-medium">Departemen</label>
-        <input
-          type="text"
-          value={departemen}
-          onChange={e => setDepartemen(e.target.value)}
           className="border rounded px-2 py-1 w-full"
           disabled={loading}
         />

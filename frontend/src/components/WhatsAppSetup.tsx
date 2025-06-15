@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Badge } from './ui/badge';
 import { CheckCircle, XCircle, RefreshCw, Send, Smartphone, MessageCircle, Clock, Loader2 } from 'lucide-react';
 import { toast } from './ui/toast';
+import api from '../api/axios';
 
 interface WhatsAppStatus {
   success: boolean;
@@ -41,8 +42,8 @@ const WhatsAppSetupComponent: React.FC = () => {
   const checkStatus = async () => {
     setLoading(true);
     try {
-      const response = await fetch('http://localhost:5000/whatsapp/status');
-      const result = await response.json();
+      const response = await api.get('/whatsapp/status');
+      const result = response.data;
       setStatus(result);
       
       // If not ready and auto-refresh enabled, get QR code
@@ -66,8 +67,8 @@ const WhatsAppSetupComponent: React.FC = () => {
   const getQRCode = async () => {
     setQrLoading(true);
     try {
-      const response = await fetch('http://localhost:5000/whatsapp/register');
-      const result: QRCodeResponse = await response.json();
+      const response = await api.get('/whatsapp/register');
+      const result: QRCodeResponse = response.data;
       
       if (result.success && result.qr) {
         setQrCode(result.qr);
@@ -97,18 +98,12 @@ const WhatsAppSetupComponent: React.FC = () => {
     setTestResult(null);
     
     try {
-      const response = await fetch('http://localhost:5000/notifications/test', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          phone: testPhone,
-          message: testMessage
-        })
+      const response = await api.post('/notifications/test', {
+        phone: testPhone,
+        message: testMessage
       });
 
-      const result: TestResult = await response.json();
+      const result: TestResult = response.data;
       setTestResult(result);
 
       if (result.success) {

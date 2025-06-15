@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Badge } from '../components/ui/badge';
 import { Trash2, Edit, Eye, Download, Send } from 'lucide-react';
 import { toast } from '../components/ui/toast';
+import api from '../api/axios';
 
 interface SidangGroup {
   id: number;
@@ -31,14 +32,10 @@ const SidangGroupPage: React.FC = () => {
 
   const fetchGroups = async () => {
     try {
-      const response = await fetch('http://localhost:5000/sidang-group');
-      if (response.ok) {
-        const data = await response.json();
-        setGroups(data);
-      } else {
-        toast.error('Gagal mengambil data sidang grup');
-      }
-    } catch (error) {
+      setLoading(true);
+      const response = await api.get<SidangGroup[]>('/sidang-group');
+      setGroups(response.data);
+    } catch (error: any) {
       console.error('Error fetching groups:', error);
       toast.error('Terjadi kesalahan saat mengambil data');
     } finally {
@@ -52,52 +49,43 @@ const SidangGroupPage: React.FC = () => {
     }
 
     try {
-      const response = await fetch(`http://localhost:5000/sidang/${id}`, {
-        method: 'DELETE',
-      });
-
-      if (response.ok) {
-        toast.success('Sidang grup berhasil dihapus');
-        fetchGroups(); // Refresh data
-      } else {
-        const error = await response.json();
-        toast.error(error.message || 'Gagal menghapus sidang grup');
-      }
-    } catch (error) {
+      await api.delete(`/sidang/${id}`);
+      toast.success('Sidang grup berhasil dihapus');
+      fetchGroups(); // Refresh data
+    } catch (error: any) {
       console.error('Error deleting group:', error);
-      toast.error('Terjadi kesalahan saat menghapus data');
+      const errorMessage = error.response?.data?.message || 'Gagal menghapus sidang grup';
+      toast.error(errorMessage);
     }
   };
 
   const handleExportAll = async () => {
     setExportLoading(true);
     try {
-      const response = await fetch('http://localhost:5000/sidang-group/export', {
-        method: 'GET',
+      const response = await api.get('/sidang-group/export', {
+        responseType: 'blob'
       });
       
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        
-        // Extract filename from response header or use default
-        const contentDisposition = response.headers.get('content-disposition');
-        const filename = contentDisposition 
-          ? contentDisposition.split('filename=')[1]?.replace(/"/g, '')
-          : `sidang_grup_${new Date().toISOString().split('T')[0]}.xlsx`;
-        
-        link.setAttribute('download', filename);
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        window.URL.revokeObjectURL(url);
-        
-        toast.success('File Excel berhasil diunduh');
-      } else {
-        toast.error('Gagal mengunduh file Excel');
-      }
+      const blob = new Blob([response.data], { 
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Extract filename from response header or use default
+      const contentDisposition = response.headers['content-disposition'];
+      const filename = contentDisposition 
+        ? contentDisposition.split('filename=')[1]?.replace(/"/g, '')
+        : `sidang_grup_${new Date().toISOString().split('T')[0]}.xlsx`;
+      
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+      toast.success('File Excel berhasil diunduh');
     } catch (error) {
       console.error('Error exporting:', error);
       toast.error('Terjadi kesalahan saat mengunduh file');
@@ -108,32 +96,30 @@ const SidangGroupPage: React.FC = () => {
 
   const handleExportSingle = async (groupId: number) => {
     try {
-      const response = await fetch(`http://localhost:5000/sidang-group/${groupId}/export`, {
-        method: 'GET',
+      const response = await api.get(`/sidang-group/${groupId}/export`, {
+        responseType: 'blob'
       });
       
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        
-        // Extract filename from response header or use default
-        const contentDisposition = response.headers.get('content-disposition');
-        const filename = contentDisposition 
-          ? contentDisposition.split('filename=')[1]?.replace(/"/g, '')
-          : `sidang_grup_${groupId}.xlsx`;
-        
-        link.setAttribute('download', filename);
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        window.URL.revokeObjectURL(url);
-        
-        toast.success('File Excel berhasil diunduh');
-      } else {
-        toast.error('Gagal mengunduh file Excel');
-      }
+      const blob = new Blob([response.data], { 
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      
+      // Extract filename from response header or use default
+      const contentDisposition = response.headers['content-disposition'];
+      const filename = contentDisposition 
+        ? contentDisposition.split('filename=')[1]?.replace(/"/g, '')
+        : `sidang_grup_${groupId}.xlsx`;
+      
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      
+      toast.success('File Excel berhasil diunduh');
     } catch (error) {
       console.error('Error exporting single group:', error);
       toast.error('Terjadi kesalahan saat mengunduh file');
@@ -143,24 +129,18 @@ const SidangGroupPage: React.FC = () => {
   const handleSendGroupNotifications = async (groupId: number) => {
     setNotificationLoading(groupId);
     try {
-      const response = await fetch(`http://localhost:5000/notifications/group/${groupId}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        }
-      });
+      const response = await api.post(`/notifications/group/${groupId}`);
       
-      const result = await response.json();
-      
-      if (result.success) {
-        const { summary } = result;
+      if (response.data.success) {
+        const { summary } = response.data;
         toast.success(`Notifikasi grup #${groupId}: ${summary.sent} berhasil, ${summary.failed} gagal dari ${summary.total_notifications} total`);
       } else {
-        toast.error(result.message || 'Gagal mengirim notifikasi');
+        toast.error(response.data.message || 'Gagal mengirim notifikasi');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error sending group notifications:', error);
-      toast.error('Terjadi kesalahan saat mengirim notifikasi');
+      const errorMessage = error.response?.data?.message || 'Terjadi kesalahan saat mengirim notifikasi';
+      toast.error(errorMessage);
     } finally {
       setNotificationLoading(null);
     }
