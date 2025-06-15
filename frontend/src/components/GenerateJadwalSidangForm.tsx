@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from './ui/form';
@@ -18,6 +18,16 @@ interface FormValues {
   file: FileList;
 }
 
+interface Rule {
+  id: number;
+  jenis_sidang: string;
+  durasi_sidang: number;
+  jumlah_penguji: number;
+  jam_awal: string;
+  jam_akhir: string;
+  jumlah_sesi: number;
+}
+
 const GenerateJadwalSidangForm: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -26,6 +36,8 @@ const GenerateJadwalSidangForm: React.FC = () => {
   const [downloadingTemplate, setDownloadingTemplate] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [rules, setRules] = useState<Rule[]>([]);
+  const [loadingRules, setLoadingRules] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
 
@@ -35,9 +47,32 @@ const GenerateJadwalSidangForm: React.FC = () => {
       jam_awal: '',
       jam_akhir: '',
       durasi_sidang: '60',
-      jenis_sidang: 'Skripsi',
+      jenis_sidang: '',
     },
   });
+
+  // Fetch rules data saat component mount
+  useEffect(() => {
+    const fetchRules = async () => {
+      try {
+        setLoadingRules(true);
+        const response = await api.get('/rule');
+        setRules(response.data);
+        
+        // Set default jenis_sidang ke rule pertama jika ada
+        if (response.data.length > 0) {
+          form.setValue('jenis_sidang', response.data[0].jenis_sidang);
+        }
+      } catch (err) {
+        console.error('Error fetching rules:', err);
+        setError('Gagal memuat data jenis sidang');
+      } finally {
+        setLoadingRules(false);
+      }
+    };
+
+    fetchRules();
+  }, [form]);
 
   const onSubmit = async (values: FormValues) => {
     setLoading(true);
@@ -228,22 +263,30 @@ const GenerateJadwalSidangForm: React.FC = () => {
         <FormField
           control={form.control}
           name="jenis_sidang"
+          rules={{ required: 'Jenis sidang wajib dipilih' }}
           render={({ field }) => (
             <FormItem>
               <FormLabel>Jenis Sidang</FormLabel>
               <FormControl>
-                <Select value={field.value} onValueChange={field.onChange}>
+                <Select value={field.value} onValueChange={field.onChange} disabled={loadingRules}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Pilih jenis sidang" />
+                    <SelectValue placeholder={loadingRules ? "Memuat jenis sidang..." : "Pilih jenis sidang"} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Skripsi">Skripsi</SelectItem>
-                    <SelectItem value="Tugas Akhir">Tugas Akhir</SelectItem>
-                    <SelectItem value="Tesis">Tesis</SelectItem>
-                    <SelectItem value="Disertasi">Disertasi</SelectItem>
+                    {rules.map((rule) => (
+                      <SelectItem key={rule.id} value={rule.jenis_sidang}>
+                        {rule.jenis_sidang}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </FormControl>
+              {loadingRules && (
+                <p className="text-sm text-gray-500 flex items-center gap-2">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Memuat data jenis sidang...
+                </p>
+              )}
               <FormMessage />
             </FormItem>
           )}
