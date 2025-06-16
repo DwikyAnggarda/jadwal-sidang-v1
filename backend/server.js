@@ -1015,14 +1015,12 @@ app.get('/moderator/template', authenticateToken, (req, res) => {
 });
 
 // Endpoint untuk penjadwalan moderator sidang otomatis (OLD - replaced by /sidang/moderator/assign)
-
-// Endpoint untuk penjadwalan moderator sidang otomatis (OLD - replaced by /sidang/moderator/assign)
 app.post('/moderator/assign', upload.single('file'), async (req, res) => {
-    const { tanggal_sidang, jam_awal, jam_akhir, durasi_sidang } = req.body;
+    const { tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang } = req.body;
 
     // Validasi field wajib
-    if (!tanggal_sidang || !jam_awal || !jam_akhir || !durasi_sidang || !req.file) {
-        return res.status(400).json({ success: false, message: 'Field tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, dan file diperlukan' });
+    if (!tanggal_sidang || !jam_awal || !jam_akhir || !durasi_sidang || !jenis_sidang || !req.file) {
+        return res.status(400).json({ success: false, message: 'Field tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang, dan file diperlukan' });
     }
 
     // Validasi file harus Excel
@@ -1449,6 +1447,396 @@ app.post('/moderator/assign', upload.single('file'), async (req, res) => {
     } catch (err) {
         console.error("Error in /sidang/moderator/assign:", err);
         return res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+    }
+});
+
+// Endpoint untuk mendapatkan daftar sidang_group
+app.get('/sidang-group', authenticateToken, async (req, res) => {
+    try {
+        const query = `
+            SELECT 
+                sg.id,
+                TO_CHAR(sg.tanggal_sidang, 'YYYY-MM-DD') as tanggal_sidang,
+                sg.jam_awal,
+                sg.jam_akhir,
+                sg.jenis_sidang,
+                sg.durasi_sidang,
+                sg.status_sidang,
+                COUNT(si.id) as jumlah_mahasiswa,
+                COUNT(DISTINCT si.moderator_id) as jumlah_dosen_moderator,
+                COUNT(DISTINCT CASE WHEN si.pembimbing_1_id IS NOT NULL THEN si.pembimbing_1_id END) + 
+                COUNT(DISTINCT CASE WHEN si.pembimbing_2_id IS NOT NULL THEN si.pembimbing_2_id END) - 
+                COUNT(DISTINCT CASE WHEN si.pembimbing_1_id = si.pembimbing_2_id THEN si.pembimbing_1_id END) as jumlah_dosen_pembimbing,
+                COUNT(DISTINCT CASE WHEN si.penguji_1_id IS NOT NULL THEN si.penguji_1_id END) + 
+                COUNT(DISTINCT CASE WHEN si.penguji_2_id IS NOT NULL THEN si.penguji_2_id END) - 
+                COUNT(DISTINCT CASE WHEN si.penguji_1_id = si.penguji_2_id THEN si.penguji_1_id END) as jumlah_dosen_penguji
+            FROM sidang_group sg
+            LEFT JOIN sidang_item si ON sg.id = si.sidang_group_id
+            GROUP BY sg.id, sg.tanggal_sidang, sg.jam_awal, sg.jam_akhir, sg.jenis_sidang, sg.durasi_sidang, sg.status_sidang
+            ORDER BY sg.tanggal_sidang DESC, sg.id DESC
+        `;
+
+        const result = await pool.query(query);
+        const groups = result.rows.map(row => ({
+            ...row,
+            status_label: row.status_sidang === 0 ? 'Belum Mulai' : row.status_sidang === 1 ? 'Sedang Berlangsung' : 'Selesai'
+        }));
+
+        res.json(groups);
+    } catch (err) {
+        console.error('Error fetching sidang groups:', err);
+        res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+    }
+});
+
+// Endpoint untuk mendapatkan detail sidang_item berdasarkan sidang_group_id
+app.get('/sidang-group/:id/detail', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        // Ambil info grup terlebih dahulu
+        const groupQuery = `
+            SELECT 
+                id,
+                TO_CHAR(tanggal_sidang, 'YYYY-MM-DD') as tanggal_sidang,
+                jam_awal,
+                jam_akhir,
+                jenis_sidang,
+                durasi_sidang,
+                status_sidang
+            FROM sidang_group 
+            WHERE id = $1
+        `;
+        const groupResult = await pool.query(groupQuery, [id]);
+
+        if (groupResult.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Sidang group tidak ditemukan' });
+        }
+
+        const group = groupResult.rows[0];
+
+        // Ambil semua sidang_item dalam grup ini dengan JOIN ke tabel terkait
+        const itemsQuery = `
+            SELECT 
+                si.id,
+                si.nrp,
+                si.nama_mahasiswa,
+                si.judul,
+                si.room,
+                TO_CHAR(si.jam_mulai_final, 'HH24:MI') as jam_mulai,
+                TO_CHAR(si.jam_selesai_final, 'HH24:MI') as jam_selesai,
+                si.durasi_sidang,
+                
+                -- Moderator
+                d_mod.nama as moderator_nama,
+                
+                -- Pembimbing
+                d_pemb1.nama as pembimbing_1_nama,
+                d_pemb2.nama as pembimbing_2_nama,
+                
+                -- Penguji
+                d_peng1.nama as penguji_1_nama,
+                d_peng2.nama as penguji_2_nama
+                
+            FROM sidang_item si
+            LEFT JOIN dosen d_mod ON si.moderator_id = d_mod.id
+            LEFT JOIN dosen d_pemb1 ON si.pembimbing_1_id = d_pemb1.id
+            LEFT JOIN dosen d_pemb2 ON si.pembimbing_2_id = d_pemb2.id
+            LEFT JOIN dosen d_peng1 ON si.penguji_1_id = d_peng1.id
+            LEFT JOIN dosen d_peng2 ON si.penguji_2_id = d_peng2.id
+            WHERE si.sidang_group_id = $1
+            ORDER BY si.room, si.jam_mulai_final
+        `;
+
+        const itemsResult = await pool.query(itemsQuery, [id]);
+
+        res.json({
+            success: true,
+            group: group,
+            items: itemsResult.rows
+        });
+
+    } catch (err) {
+        console.error('Error fetching sidang group detail:', err);
+        res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+    }
+});
+
+// Endpoint untuk menghapus sidang_group dan sidang_item terkait
+app.delete('/sidang/:id', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        await pool.query('BEGIN');
+
+        // Hapus semua sidang_item yang terkait dengan sidang_group_id
+        await pool.query('DELETE FROM sidang_item WHERE sidang_group_id = $1', [id]);
+
+        // Hapus sidang_group
+        const result = await pool.query('DELETE FROM sidang_group WHERE id = $1 RETURNING *', [id]);
+
+        if (result.rows.length === 0) {
+            await pool.query('ROLLBACK');
+            return res.status(404).json({ success: false, message: 'Sidang group tidak ditemukan' });
+        }
+
+        await pool.query('COMMIT');
+        res.json({ success: true, message: 'Sidang group berhasil dihapus' });
+    } catch (err) {
+        await pool.query('ROLLBACK');
+        console.error('Error deleting sidang group:', err);
+        res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+    }
+});
+
+// Endpoint untuk export semua sidang grup ke Excel
+app.get('/sidang-group/export', authenticateToken, async (req, res) => {
+    try {
+        // Ambil data sidang grup dengan statistik
+        const groupQuery = `
+            SELECT 
+                sg.id,
+                TO_CHAR(sg.tanggal_sidang, 'YYYY-MM-DD') as tanggal_sidang,
+                sg.jam_awal,
+                sg.jam_akhir,
+                sg.jenis_sidang,
+                sg.durasi_sidang,
+                sg.status_sidang,
+                CASE 
+                    WHEN sg.status_sidang = 0 THEN 'Belum Mulai'
+                    WHEN sg.status_sidang = 1 THEN 'Sedang Berlangsung'
+                    WHEN sg.status_sidang = 2 THEN 'Selesai'
+                    ELSE 'Unknown'
+                END as status_label,
+                COUNT(si.id) as jumlah_mahasiswa,
+                COUNT(DISTINCT si.moderator_id) as jumlah_dosen_moderator,
+                COUNT(DISTINCT CASE WHEN si.pembimbing_1_id IS NOT NULL THEN si.pembimbing_1_id END) + 
+                COUNT(DISTINCT CASE WHEN si.pembimbing_2_id IS NOT NULL THEN si.pembimbing_2_id END) - 
+                COUNT(DISTINCT CASE WHEN si.pembimbing_1_id = si.pembimbing_2_id THEN si.pembimbing_1_id END) as jumlah_dosen_pembimbing,
+                COUNT(DISTINCT CASE WHEN si.penguji_1_id IS NOT NULL THEN si.penguji_1_id END) + 
+                COUNT(DISTINCT CASE WHEN si.penguji_2_id IS NOT NULL THEN si.penguji_2_id END) - 
+                COUNT(DISTINCT CASE WHEN si.penguji_1_id = si.penguji_2_id THEN si.penguji_1_id END) as jumlah_dosen_penguji
+            FROM sidang_group sg
+            LEFT JOIN sidang_item si ON sg.id = si.sidang_group_id
+            GROUP BY sg.id, sg.tanggal_sidang, sg.jam_awal, sg.jam_akhir, sg.jenis_sidang, sg.durasi_sidang, sg.status_sidang
+            ORDER BY sg.tanggal_sidang DESC, sg.id DESC
+        `;
+
+        const groupResult = await pool.query(groupQuery);
+        const groups = groupResult.rows;
+
+        // Buat workbook dengan 2 sheet
+        const workbook = xlsx.utils.book_new();
+
+        // Sheet 1: Ringkasan Grup
+        const summaryData = [
+            ['ID Grup', 'Tanggal Sidang', 'Jam Mulai', 'Jam Selesai', 'Jenis Sidang', 'Durasi (menit)', 'Status', 'Jumlah Mahasiswa', 'Jumlah Moderator', 'Jumlah Pembimbing', 'Jumlah Penguji']
+        ];
+
+        groups.forEach(group => {
+            summaryData.push([
+                group.id,
+                group.tanggal_sidang,
+                group.jam_awal,
+                group.jam_akhir,
+                group.jenis_sidang,
+                group.durasi_sidang,
+                group.status_label,
+                group.jumlah_mahasiswa,
+                group.jumlah_dosen_moderator,
+                group.jumlah_dosen_pembimbing,
+                group.jumlah_dosen_penguji
+            ]);
+        });
+
+        const summarySheet = xlsx.utils.aoa_to_sheet(summaryData);
+        xlsx.utils.book_append_sheet(workbook, summarySheet, 'Ringkasan Grup');
+
+        // Sheet 2: Detail Semua Mahasiswa
+        if (groups.length > 0) {
+            const detailQuery = `
+                SELECT 
+                    sg.id as grup_id,
+                    TO_CHAR(sg.tanggal_sidang, 'YYYY-MM-DD') as tanggal_sidang,
+                    si.nrp,
+                    si.nama_mahasiswa,
+                    si.judul,
+                    si.room,
+                    TO_CHAR(si.jam_mulai_final, 'HH24:MI') as jam_mulai,
+                    TO_CHAR(si.jam_selesai_final, 'HH24:MI') as jam_selesai,
+                    d_mod.nama as moderator_nama,
+                    d_pemb1.nama as pembimbing_1_nama,
+                    d_pemb2.nama as pembimbing_2_nama,
+                    d_peng1.nama as penguji_1_nama,
+                    d_peng2.nama as penguji_2_nama
+                FROM sidang_group sg
+                JOIN sidang_item si ON sg.id = si.sidang_group_id
+                LEFT JOIN dosen d_mod ON si.moderator_id = d_mod.id
+                LEFT JOIN dosen d_pemb1 ON si.pembimbing_1_id = d_pemb1.id
+                LEFT JOIN dosen d_pemb2 ON si.pembimbing_2_id = d_pemb2.id
+                LEFT JOIN dosen d_peng1 ON si.penguji_1_id = d_peng1.id
+                LEFT JOIN dosen d_peng2 ON si.penguji_2_id = d_peng2.id
+                ORDER BY sg.tanggal_sidang DESC, si.room, si.jam_mulai_final
+            `;
+
+            const detailResult = await pool.query(detailQuery);
+            const items = detailResult.rows;
+
+            const detailData = [
+                ['ID Grup', 'Tanggal', 'Ruang', 'Jam Mulai', 'Jam Selesai', 'NRP', 'Nama Mahasiswa', 'Judul', 'Moderator', 'Pembimbing 1', 'Pembimbing 2', 'Penguji 1', 'Penguji 2']
+            ];
+
+            items.forEach(item => {
+                detailData.push([
+                    item.grup_id,
+                    item.tanggal_sidang,
+                    item.room,
+                    item.jam_mulai,
+                    item.jam_selesai,
+                    item.nrp,
+                    item.nama_mahasiswa,
+                    item.judul,
+                    item.moderator_nama || '-',
+                    item.pembimbing_1_nama || '-',
+                    item.pembimbing_2_nama || '-',
+                    item.penguji_1_nama || '-',
+                    item.penguji_2_nama || '-'
+                ]);
+            });
+
+            const detailSheet = xlsx.utils.aoa_to_sheet(detailData);
+            xlsx.utils.book_append_sheet(workbook, detailSheet, 'Detail Mahasiswa');
+        }
+
+        // Generate file dengan timestamp
+        const currentDate = new Date().toISOString().split('T')[0];
+        const filename = `sidang_grup_${currentDate}.xlsx`;
+
+        const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.send(buffer);
+
+    } catch (err) {
+        console.error('Error exporting sidang groups:', err);
+        res.status(500).json({ success: false, message: 'Server error: ' + err.message });
+    }
+});
+
+// Endpoint untuk export sidang grup tertentu ke Excel
+app.get('/sidang-group/:id/export', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+
+    try {
+        // Ambil info grup
+        const groupQuery = `
+            SELECT 
+                id,
+                TO_CHAR(tanggal_sidang, 'YYYY-MM-DD') as tanggal_sidang,
+                jam_awal,
+                jam_akhir,
+                jenis_sidang,
+                durasi_sidang,
+                status_sidang,
+                CASE 
+                    WHEN status_sidang = 0 THEN 'Belum Mulai'
+                    WHEN status_sidang = 1 THEN 'Sedang Berlangsung'
+                    WHEN status_sidang = 2 THEN 'Selesai'
+                    ELSE 'Unknown'
+                END as status_label
+            FROM sidang_group 
+            WHERE id = $1
+        `;
+        const groupResult = await pool.query(groupQuery, [id]);
+
+        if (groupResult.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Sidang group tidak ditemukan' });
+        }
+
+        const group = groupResult.rows[0];
+
+        // Ambil semua sidang_item dalam grup ini
+        const itemsQuery = `
+            SELECT 
+                si.nrp,
+                si.nama_mahasiswa,
+                si.judul,
+                si.room,
+                TO_CHAR(si.jam_mulai_final, 'HH24:MI') as jam_mulai,
+                TO_CHAR(si.jam_selesai_final, 'HH24:MI') as jam_selesai,
+                si.durasi_sidang,
+                d_mod.nama as moderator_nama,
+                d_pemb1.nama as pembimbing_1_nama,
+                d_pemb2.nama as pembimbing_2_nama,
+                d_peng1.nama as penguji_1_nama,
+                d_peng2.nama as penguji_2_nama
+            FROM sidang_item si
+            LEFT JOIN dosen d_mod ON si.moderator_id = d_mod.id
+            LEFT JOIN dosen d_pemb1 ON si.pembimbing_1_id = d_pemb1.id
+            LEFT JOIN dosen d_pemb2 ON si.pembimbing_2_id = d_pemb2.id
+            LEFT JOIN dosen d_peng1 ON si.penguji_1_id = d_peng1.id
+            LEFT JOIN dosen d_peng2 ON si.penguji_2_id = d_peng2.id
+            WHERE si.sidang_group_id = $1
+            ORDER BY si.room, si.jam_mulai_final
+        `;
+
+        const itemsResult = await pool.query(itemsQuery, [id]);
+        const items = itemsResult.rows;
+
+        // Buat workbook
+        const workbook = xlsx.utils.book_new();
+
+        // Sheet 1: Info Grup
+        const infoData = [
+            ['Field', 'Value'],
+            ['ID Grup', group.id],
+            ['Tanggal Sidang', group.tanggal_sidang],
+            ['Waktu', `${group.jam_awal} - ${group.jam_akhir}`],
+            ['Jenis Sidang', group.jenis_sidang],
+            ['Durasi per Sidang', `${group.durasi_sidang} menit`],
+            ['Status', group.status_label],
+            ['Total Mahasiswa', items.length]
+        ];
+
+        const infoSheet = xlsx.utils.aoa_to_sheet(infoData);
+        xlsx.utils.book_append_sheet(workbook, infoSheet, 'Info Grup');
+
+        // Sheet 2: Detail Mahasiswa
+        const detailData = [
+            ['No', 'Ruang', 'Jam Mulai', 'Jam Selesai', 'NRP', 'Nama Mahasiswa', 'Judul', 'Moderator', 'Pembimbing 1', 'Pembimbing 2', 'Penguji 1', 'Penguji 2']
+        ];
+
+        items.forEach((item, index) => {
+            detailData.push([
+                index + 1,
+                item.room,
+                item.jam_mulai,
+                item.jam_selesai,
+                item.nrp,
+                item.nama_mahasiswa,
+                item.judul,
+                item.moderator_nama || '-',
+                item.pembimbing_1_nama || '-',
+                item.pembimbing_2_nama || '-',
+                item.penguji_1_nama || '-',
+                item.penguji_2_nama || '-'
+            ]);
+        });
+
+        const detailSheet = xlsx.utils.aoa_to_sheet(detailData);
+        xlsx.utils.book_append_sheet(workbook, detailSheet, 'Detail Mahasiswa');
+
+        // Generate filename
+        const filename = `sidang_grup_${id}_${group.tanggal_sidang}.xlsx`;
+
+        const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.send(buffer);
+
+    } catch (err) {
+        console.error('Error exporting sidang group detail:', err);
+        res.status(500).json({ success: false, message: 'Server error: ' + err.message });
     }
 });
 
