@@ -7,13 +7,168 @@ const upload = multer({ dest: 'uploads/' });
 const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
+const { Client, LocalAuth } = require('whatsapp-web.js');
+const QRCode = require('qrcode');
+
+// Import authentication middleware and routes
+const { authenticateToken } = require('./middleware/auth');
+const authRoutes = require('./routes/auth');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Authentication routes (unprotected)
+app.use('/auth', authRoutes);
+
+// =================== WHATSAPP CLIENT INITIALIZATION ===================
+let qrCodeString = ""; // Store QR Code temporarily
+let whatsappClient = null; // WhatsApp client variable
+let isWhatsAppReady = false; // Flag to check if client is initialized
+
+// Function to initialize WhatsApp client
+const initializeWhatsApp = () => {
+    whatsappClient = new Client({
+        puppeteer: {
+            args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        },
+        authStrategy: new LocalAuth({
+            clientId: "session-whatsapp", // Session storage folder
+        }),
+    });
+
+    // Event when client is ready
+    whatsappClient.on("ready", () => {
+        console.log("✅ WhatsApp Web client ready!");
+        isWhatsAppReady = true;
+        qrCodeString = ""; // Clear QR Code after session starts
+    });
+
+    // Event for handling authentication failures
+    whatsappClient.on("auth_failure", () => {
+        console.log("❌ WhatsApp authentication failed. Please re-register.");
+        isWhatsAppReady = false;
+    });
+
+    // Event when client is disconnected
+    whatsappClient.on("disconnected", (reason) => {
+        console.log("🔌 WhatsApp client disconnected. Reason:", reason);
+        isWhatsAppReady = false;
+    });
+
+    // Event for QR code generation
+    whatsappClient.on("qr", (qr) => {
+        qrCodeString = qr;
+        console.log("📱 QR Code updated. Please scan with your WhatsApp.");
+    });
+
+    whatsappClient.initialize();
+    console.log("🚀 Initializing WhatsApp Web client...");
+};
+
+// Initialize WhatsApp client when server starts
+initializeWhatsApp();
+
+// =================== RULE CRUD API ===================
+// GET all rules
+app.get('/rule', authenticateToken, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM rule ORDER BY id ASC');
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// GET rule by id (optional, for edit form)
+app.get('/rule/:id', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query('SELECT * FROM rule WHERE id = $1', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Rule tidak ditemukan' });
+        }
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// CREATE rule
+app.post('/rule', authenticateToken, async (req, res) => {
+    const { jenis_sidang, durasi_sidang, jumlah_sesi } = req.body;
+    if (!jenis_sidang || !durasi_sidang || !jumlah_sesi) {
+        return res.status(400).json({ success: false, message: 'Field jenis_sidang, durasi_sidang, jumlah_sesi wajib diisi' });
+    }
+    if (isNaN(durasi_sidang) || isNaN(jumlah_sesi) || durasi_sidang <= 0 || jumlah_sesi <= 0) {
+        return res.status(400).json({ success: false, message: 'Durasi dan jumlah sesi harus angka > 0' });
+    }
+    try {
+        // Cek unik
+        const exist = await pool.query('SELECT id FROM rule WHERE LOWER(jenis_sidang) = LOWER($1)', [jenis_sidang]);
+        if (exist.rows.length > 0) {
+            return res.status(400).json({ success: false, message: 'Jenis sidang sudah ada' });
+        }
+        const result = await pool.query(
+            'INSERT INTO rule (jenis_sidang, durasi_sidang, jumlah_sesi) VALUES ($1, $2, $3) RETURNING *',
+            [jenis_sidang, durasi_sidang, jumlah_sesi]
+        );
+        res.json({ success: true, data: result.rows[0] });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// UPDATE rule
+app.put('/rule/:id', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    const { jenis_sidang, durasi_sidang, jumlah_sesi } = req.body;
+    if (!jenis_sidang || !durasi_sidang || !jumlah_sesi) {
+        return res.status(400).json({ success: false, message: 'Field jenis_sidang, durasi_sidang, jumlah_sesi wajib diisi' });
+    }
+    if (isNaN(durasi_sidang) || isNaN(jumlah_sesi) || durasi_sidang <= 0 || jumlah_sesi <= 0) {
+        return res.status(400).json({ success: false, message: 'Durasi dan jumlah sesi harus angka > 0' });
+    }
+    try {
+        // Cek unik kecuali milik sendiri
+        const exist = await pool.query('SELECT id FROM rule WHERE LOWER(jenis_sidang) = LOWER($1) AND id != $2', [jenis_sidang, id]);
+        if (exist.rows.length > 0) {
+            return res.status(400).json({ success: false, message: 'Jenis sidang sudah ada' });
+        }
+        const result = await pool.query(
+            'UPDATE rule SET jenis_sidang = $1, durasi_sidang = $2, jumlah_sesi = $3 WHERE id = $4 RETURNING *',
+            [jenis_sidang, durasi_sidang, jumlah_sesi, id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Rule tidak ditemukan' });
+        }
+        res.json({ success: true, data: result.rows[0] });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// DELETE rule
+app.delete('/rule/:id', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query('DELETE FROM rule WHERE id = $1 RETURNING *', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Rule tidak ditemukan' });
+        }
+        res.json({ success: true, message: 'Rule berhasil dihapus' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
 // Endpoint untuk mendapatkan daftar dosen
-app.get('/dosen', async (req, res) => {
+app.get('/dosen', authenticateToken, async (req, res) => {
     try {
         const result = await pool.query('SELECT * FROM dosen ORDER BY nama ASC');
         res.json(result.rows);
@@ -24,12 +179,9 @@ app.get('/dosen', async (req, res) => {
 });
 
 // Endpoint untuk mendapatkan daftar mahasiswa
-app.get('/mahasiswa', async (req, res) => {
+app.get('/mahasiswa', authenticateToken, async (req, res) => {
     try {
-        const { without_pembimbing, with_pembimbing, without_sidang } = req.query;
-        // Act Mode
-
-        // Build base query with LEFT JOIN to dosen for pembimbing_1 and pembimbing_2
+        const { without_pembimbing, with_pembimbing, without_sidang, page = 1, limit = 10 } = req.query;
         let query = `
             SELECT m.*, 
                d1.nama AS pembimbing_1_nama, 
@@ -56,8 +208,23 @@ app.get('/mahasiswa', async (req, res) => {
         }
         query += ' ORDER BY m.nama ASC';
 
-        const result = await pool.query(query, values);
-        res.json(result.rows);
+        // Pagination
+        const pageNum = parseInt(page, 10) || 1;
+        const limitNum = parseInt(limit, 10) || 10;
+        const offset = (pageNum - 1) * limitNum;
+
+        // Get total count
+        let countQuery = 'SELECT COUNT(*) FROM mahasiswa m';
+        if (conditions.length > 0) {
+            countQuery += ' WHERE ' + conditions.join(' AND ');
+        }
+        const countResult = await pool.query(countQuery, values);
+        const total = parseInt(countResult.rows[0].count, 10);
+
+        // Add limit/offset
+        query += ` LIMIT $${values.length + 1} OFFSET $${values.length + 2}`;
+        const result = await pool.query(query, [...values, limitNum, offset]);
+        res.json({ data: result.rows, total });
     } catch (err) {
         console.error(err);
         res.status(500).send('Server error');
@@ -65,37 +232,380 @@ app.get('/mahasiswa', async (req, res) => {
 });
 
 // Endpoint untuk menambahkan dosen
-app.post('/dosen', async (req, res) => {
-    const { nama, departemen, no_hp } = req.body;
+app.post('/dosen', authenticateToken, async (req, res) => {
+    const { nama, nip, no_hp } = req.body;
+    if (!nama || !nip || !no_hp) {
+        return res.status(400).json({ success: false, message: 'Field nama, nip, dan no_hp wajib diisi' });
+    }
     try {
+        // Cek NIP unik
+        const exist = await pool.query('SELECT id FROM dosen WHERE nip = $1', [nip]);
+        if (exist.rows.length > 0) {
+            return res.status(400).json({ success: false, message: 'NIP sudah digunakan oleh dosen lain' });
+        }
         const result = await pool.query(
-            'INSERT INTO dosen (nama, departemen, no_hp) VALUES ($1, $2, $3) RETURNING *',
-            [nama, departemen, no_hp]
+            'INSERT INTO dosen (nama, nip, no_hp) VALUES ($1, $2, $3) RETURNING *',
+            [nama, nip, no_hp]
         );
-        res.json(result.rows[0]);
+        res.json({ success: true, data: result.rows[0] });
     } catch (err) {
         console.error(err);
-        res.status(500).send('Server error');
+        res.status(500).json({ success: false, message: 'Server error' });
     }
 });
 
-// Endpoint untuk menambahkan mahasiswa (tanpa pembimbing)
-app.post('/mahasiswa', async (req, res) => {
-    const { nama, departemen } = req.body;
+// Endpoint untuk mengupdate data dosen
+app.put('/dosen/:id', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    const { nama, nip, no_hp } = req.body;
+    if (!nama || !nip || !no_hp) {
+        return res.status(400).json({ success: false, message: 'Field nama, nip, dan no_hp wajib diisi' });
+    }
     try {
+        // Cek NIP unik (kecuali milik sendiri)
+        const exist = await pool.query('SELECT id FROM dosen WHERE nip = $1 AND id != $2', [nip, id]);
+        if (exist.rows.length > 0) {
+            return res.status(400).json({ success: false, message: 'NIP sudah digunakan oleh dosen lain' });
+        }
         const result = await pool.query(
-            'INSERT INTO mahasiswa (nama, departemen) VALUES ($1, $2) RETURNING *',
-            [nama, departemen]
+            'UPDATE dosen SET nama = $1, nip = $2, no_hp = $3 WHERE id = $4 RETURNING *',
+            [nama, nip, no_hp, id]
         );
-        res.json(result.rows[0]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Dosen tidak ditemukan' });
+        }
+        res.json({ success: true, data: result.rows[0] });
     } catch (err) {
         console.error(err);
-        res.status(500).send('Server error');
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// Endpoint untuk menghapus dosen
+app.delete('/dosen/:id', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query('DELETE FROM dosen WHERE id = $1 RETURNING *', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Dosen tidak ditemukan' });
+        }
+        res.json({ success: true, message: 'Dosen berhasil dihapus' });
+    } catch (err) {
+        // Cek jika error karena foreign key constraint
+        if (err.code === '23503') {
+            return res.status(400).json({ success: false, message: 'Dosen tidak dapat dihapus karena masih digunakan di data lain.' });
+        }
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// Endpoint untuk export data dosen ke Excel
+app.get('/dosen/export', authenticateToken, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM dosen ORDER BY nama ASC');
+        const dosenRows = result.rows;
+        // Header kolom
+        const wsData = [
+            ['Nama', 'NIP', 'No HP']
+        ];
+        // Data
+        dosenRows.forEach(d => {
+            wsData.push([
+                d.nama,
+                d.nip,
+                d.no_hp
+            ]);
+        });
+        const workbook = xlsx.utils.book_new();
+        const worksheet = xlsx.utils.aoa_to_sheet(wsData);
+        xlsx.utils.book_append_sheet(workbook, worksheet, 'DataDosen');
+        const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        res.setHeader('Content-Disposition', 'attachment; filename="data_dosen.xlsx"');
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.send(buffer);
+    } catch (err) {
+        console.error(err);
+        res.status(500).send('Gagal export data dosen');
+    }
+});
+
+// Endpoint untuk download template Excel dosen
+app.get('/dosen/template', authenticateToken, (req, res) => {
+    const workbook = xlsx.utils.book_new();
+    const wsData = [
+        ['Nama', 'NIP', 'No HP'],
+        ['Contoh: Dosen A', '123456789', '081234567890']
+    ];
+    const worksheet = xlsx.utils.aoa_to_sheet(wsData);
+    xlsx.utils.book_append_sheet(workbook, worksheet, 'TemplateDosen');
+    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Disposition', 'attachment; filename="template_dosen.xlsx"');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buffer);
+});
+
+// Endpoint untuk import data dosen dari Excel
+app.post('/dosen/import', authenticateToken, upload.single('file'), async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ success: false, message: 'File Excel diperlukan' });
+    }
+    let dosenList;
+    let workbook;
+    try {
+        workbook = xlsx.readFile(req.file.path);
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+
+        // Validasi header Excel file
+        const allData = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        if (allData.length > 0) {
+            const headers = allData[0];
+            const expectedHeaders = ['Nama', 'NIP', 'No HP'];
+            const headersValid = expectedHeaders.every((header, index) =>
+                headers[index] && headers[index].toString().trim().toLowerCase() === header.toLowerCase()
+            );
+            if (!headersValid) {
+                fs.unlinkSync(req.file.path);
+                return res.status(400).json({
+                    success: false,
+                    message: `Header Excel tidak sesuai template. Expected: ${expectedHeaders.join(', ')}`
+                });
+            }
+        }
+
+        dosenList = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        // Remove header and example row
+        dosenList = dosenList.slice(1).filter(row => row[0]);
+    } catch (err) {
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({ success: false, message: 'File excel tidak valid' });
+    }
+    fs.unlinkSync(req.file.path);
+
+    // Format: [Nama, NIP, No HP]
+    if (!dosenList.length) {
+        return res.status(400).json({ success: false, message: 'Data dosen kosong di file' });
+    }
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        for (const row of dosenList) {
+            const [nama, nip, no_hp] = row;
+            if (!nama || !nip || !no_hp) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, message: `Data tidak lengkap pada baris: ${JSON.stringify(row)}` });
+            }
+            // Cek duplikat NIP
+            const exist = await client.query('SELECT 1 FROM dosen WHERE nip = $1', [nip]);
+            if (exist.rows.length > 0) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, message: `Dosen dengan NIP "${nip}" sudah ada di database.` });
+            }
+            await client.query(
+                'INSERT INTO dosen (nama, nip, no_hp) VALUES ($1, $2, $3)',
+                [nama, nip, no_hp]
+            );
+        }
+        await client.query('COMMIT');
+        res.json({ success: true, message: 'Import data dosen berhasil' });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    } finally {
+        client.release();
+    }
+});
+
+// Endpoint untuk menambahkan mahasiswa (dengan NRP wajib unik)
+app.post('/mahasiswa', authenticateToken, async (req, res) => {
+    const { nrp, nama } = req.body;
+    if (!nrp || !nama) {
+        return res.status(400).json({ success: false, message: 'Field nrp dan nama wajib diisi' });
+    }
+    try {
+        // Cek NRP unik
+        const exist = await pool.query('SELECT id FROM mahasiswa WHERE nrp = $1', [nrp]);
+        if (exist.rows.length > 0) {
+            return res.status(400).json({ success: false, message: 'NRP sudah digunakan oleh mahasiswa lain' });
+        }
+        const result = await pool.query(
+            'INSERT INTO mahasiswa (nrp, nama) VALUES ($1, $2) RETURNING *',
+            [nrp, nama]
+        );
+        res.json({ success: true, data: result.rows[0] });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// Endpoint untuk update data mahasiswa (nama, nrp)
+app.put('/mahasiswa/:id', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    const { nrp, nama } = req.body;
+    if (!nrp || !nama) {
+        return res.status(400).json({ success: false, message: 'Field nrp dan nama wajib diisi' });
+    }
+    try {
+        // Cek NRP unik (kecuali milik sendiri)
+        const exist = await pool.query('SELECT id FROM mahasiswa WHERE nrp = $1 AND id != $2', [nrp, id]);
+        if (exist.rows.length > 0) {
+            return res.status(400).json({ success: false, message: 'NRP sudah digunakan oleh mahasiswa lain' });
+        }
+        const result = await pool.query(
+            'UPDATE mahasiswa SET nrp = $1, nama = $2 WHERE id = $3 RETURNING *',
+            [nrp, nama, id]
+        );
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Mahasiswa tidak ditemukan' });
+        }
+        res.json({ success: true, data: result.rows[0] });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// Endpoint untuk menghapus mahasiswa
+app.delete('/mahasiswa/:id', authenticateToken, async (req, res) => {
+    const { id } = req.params;
+    try {
+        const result = await pool.query('DELETE FROM mahasiswa WHERE id = $1 RETURNING *', [id]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ success: false, message: 'Mahasiswa tidak ditemukan' });
+        }
+        res.json({ success: true, message: 'Mahasiswa berhasil dihapus' });
+    } catch (err) {
+        // Cek jika error karena foreign key constraint (misal sudah punya sidang)
+        if (err.code === '23503') {
+            return res.status(400).json({ success: false, message: 'Mahasiswa tidak dapat dihapus karena masih digunakan di data lain (misal sudah punya sidang).' });
+        }
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    }
+});
+
+// Endpoint untuk export data mahasiswa ke Excel
+app.get('/mahasiswa/export', authenticateToken, async (req, res) => {
+    try {
+        const result = await pool.query('SELECT * FROM mahasiswa ORDER BY nama ASC');
+        const mahasiswaRows = result.rows;
+        // Header kolom
+        const wsData = [
+            ['NRP', 'Nama']
+        ];
+        // Data
+        mahasiswaRows.forEach(m => {
+            wsData.push([
+                m.nrp,
+                m.nama
+            ]);
+        });
+        const workbook = xlsx.utils.book_new();
+        const worksheet = xlsx.utils.aoa_to_sheet(wsData);
+        xlsx.utils.book_append_sheet(workbook, worksheet, 'DataMahasiswa');
+        const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+        res.setHeader('Content-Disposition', 'attachment; filename="data_mahasiswa.xlsx"');
+        res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        res.send(buffer);
+    } catch (err) {
+        console.error(err);
+        res.status(500).send('Gagal export data mahasiswa');
+    }
+});
+// Endpoint untuk download template Excel mahasiswa
+app.get('/mahasiswa/template', authenticateToken, (req, res) => {
+    const workbook = xlsx.utils.book_new();
+    const wsData = [
+        ['NRP', 'Nama'],
+        ['Contoh: 05111940000001', 'Nama Mahasiswa']
+    ];
+    const worksheet = xlsx.utils.aoa_to_sheet(wsData);
+    xlsx.utils.book_append_sheet(workbook, worksheet, 'TemplateMahasiswa');
+    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Disposition', 'attachment; filename="template_mahasiswa.xlsx"');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buffer);
+});
+
+// Endpoint untuk import data mahasiswa dari Excel
+app.post('/mahasiswa/import', authenticateToken, upload.single('file'), async (req, res) => {
+    if (!req.file) {
+        return res.status(400).json({ success: false, message: 'File Excel diperlukan' });
+    }
+    let mahasiswaList;
+    let workbook;
+    try {
+        workbook = xlsx.readFile(req.file.path);
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+
+        // Validasi header Excel file
+        const allData = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        if (allData.length > 0) {
+            const headers = allData[0];
+            const expectedHeaders = ['NRP', 'Nama'];
+            const headersValid = expectedHeaders.every((header, index) =>
+                headers[index] && headers[index].toString().trim().toLowerCase() === header.toLowerCase()
+            );
+            if (!headersValid) {
+                fs.unlinkSync(req.file.path);
+                return res.status(400).json({
+                    success: false,
+                    message: `Header Excel tidak sesuai template. Expected: ${expectedHeaders.join(', ')}`
+                });
+            }
+        }
+
+        mahasiswaList = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        // Remove header and example row
+        mahasiswaList = mahasiswaList.slice(1).filter(row => row[0]);
+    } catch (err) {
+        fs.unlinkSync(req.file.path);
+        return res.status(400).json({ success: false, message: 'File excel tidak valid' });
+    }
+    fs.unlinkSync(req.file.path);
+
+    // Format: [NRP, Nama]
+    if (!mahasiswaList.length) {
+        return res.status(400).json({ success: false, message: 'Data mahasiswa kosong di file' });
+    }
+
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        for (const row of mahasiswaList) {
+            const [nrp, nama] = row;
+            if (!nrp || !nama) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, message: `Data tidak lengkap pada baris: ${JSON.stringify(row)}` });
+            }
+            // Cek duplikat NRP
+            const exist = await client.query('SELECT 1 FROM mahasiswa WHERE nrp = $1', [nrp]);
+            if (exist.rows.length > 0) {
+                await client.query('ROLLBACK');
+                return res.status(400).json({ success: false, message: `Mahasiswa dengan NRP "${nrp}" sudah ada di database.` });
+            }
+            await client.query(
+                'INSERT INTO mahasiswa (nrp, nama) VALUES ($1, $2)',
+                [nrp, nama]
+            );
+        }
+        await client.query('COMMIT');
+        res.json({ success: true, message: 'Import data mahasiswa berhasil' });
+    } catch (err) {
+        await client.query('ROLLBACK');
+        console.error(err);
+        res.status(500).json({ success: false, message: 'Server error' });
+    } finally {
+        client.release();
     }
 });
 
 // Endpoint untuk mengotomatisasi penentuan dosen dan jadwal sidang
-app.post('/sidang/assign', async (req, res) => {
+app.post('/sidang/assign', authenticateToken, async (req, res) => {
     const { mahasiswa_id, tanggal_sidang, jam_mulai_sidang, durasi_sidang, room } = req.body;
 
     if (!mahasiswa_id || !tanggal_sidang || !jam_mulai_sidang || !durasi_sidang || !room) {
@@ -203,7 +713,7 @@ app.post('/sidang/assign', async (req, res) => {
 });
 
 // Endpoint untuk menugaskan pembimbing
-app.post('/pembimbing/assign', async (req, res) => {
+app.post('/pembimbing/assign', authenticateToken, async (req, res) => {
     const { mahasiswa_id, pembimbing_1_id, pembimbing_2_id } = req.body;
     try {
         const mahasiswaResult = await pool.query('SELECT pembimbing_1_id, pembimbing_2_id FROM mahasiswa WHERE id = $1', [mahasiswa_id]);
@@ -219,19 +729,14 @@ app.post('/pembimbing/assign', async (req, res) => {
             if (pembimbing_1_id === pembimbing_2_id) {
                 return res.status(400).send('Pembimbing harus berbeda');
             }
-            const dosenResult = await pool.query('SELECT id, bimbingan_saat_ini, maksimal_bimbingan FROM dosen WHERE id IN ($1, $2)', [pembimbing_1_id, pembimbing_2_id]);
+            const dosenResult = await pool.query('SELECT id FROM dosen WHERE id IN ($1, $2)', [pembimbing_1_id, pembimbing_2_id]);
             if (dosenResult.rows.length !== 2) {
                 return res.status(400).send('Satu atau kedua pembimbing tidak ditemukan');
-            }
-            for (const dosen of dosenResult.rows) {
-                if (dosen.bimbingan_saat_ini >= dosen.maksimal_bimbingan) {
-                    return res.status(400).send(`Pembimbing ${dosen.id} telah mencapai kapasitas maksimum`);
-                }
             }
             supervisor1 = dosenResult.rows.find(d => d.id === pembimbing_1_id);
             supervisor2 = dosenResult.rows.find(d => d.id === pembimbing_2_id);
         } else {
-            const availableDosenResult = await pool.query('SELECT id FROM dosen WHERE bimbingan_saat_ini < maksimal_bimbingan');
+            const availableDosenResult = await pool.query('SELECT id FROM dosen');
             const availableDosen = availableDosenResult.rows;
             if (availableDosen.length < 2) {
                 return res.status(400).send('Tidak cukup pembimbing yang tersedia');
@@ -241,7 +746,6 @@ app.post('/pembimbing/assign', async (req, res) => {
             supervisor2 = shuffled[1];
         }
         await pool.query('UPDATE mahasiswa SET pembimbing_1_id = $1, pembimbing_2_id = $2 WHERE id = $3', [supervisor1.id, supervisor2.id, mahasiswa_id]);
-        await pool.query('UPDATE dosen SET bimbingan_saat_ini = bimbingan_saat_ini + 1 WHERE id IN ($1, $2)', [supervisor1.id, supervisor2.id]);
         res.send('Pembimbing berhasil ditugaskan');
     } catch (err) {
         console.error(err);
@@ -250,10 +754,10 @@ app.post('/pembimbing/assign', async (req, res) => {
 });
 
 // Endpoint untuk mendapatkan daftar sidang
-app.get('/sidang', async (req, res) => {
+app.get('/sidang', authenticateToken, async (req, res) => {
     try {
         let query = `
-            SELECT s.id, s.mahasiswa_id, m.nama as mahasiswa_nama, m.departemen as mahasiswa_departemen,
+            SELECT s.id, s.mahasiswa_id, m.nama as mahasiswa_nama,
                s.pembimbing_1_id, d1.nama as pembimbing_1_nama,
                s.pembimbing_2_id, d2.nama as pembimbing_2_nama,
                s.penguji_1_id, d3.nama as penguji_1_nama,
@@ -293,7 +797,7 @@ app.get('/sidang', async (req, res) => {
 });
 
 // Endpoint batch assign jadwal sidang
-app.post('/sidang/batch-assign', upload.single('file'), async (req, res) => {
+app.post('/sidang/batch-assign', authenticateToken, upload.single('file'), async (req, res) => {
     const { tanggal_sidang, jam_mulai_sidang, durasi_sidang } = req.body;
     if (!tanggal_sidang || !jam_mulai_sidang || !durasi_sidang || !req.file) {
         return res.status(400).json({ success: false, message: 'Field tanggal_sidang, jam_mulai_sidang, durasi_sidang, dan file diperlukan' });
@@ -493,6 +997,24 @@ app.post('/sidang/batch-assign', upload.single('file'), async (req, res) => {
         return res.status(500).json({ success: false, message: 'Server error: ' + err.message });
     }
 });
+
+// Endpoint untuk download template Excel jadwal sidang
+app.get('/moderator/template', authenticateToken, (req, res) => {
+    const workbook = xlsx.utils.book_new();
+    const wsData = [
+        ['NRP', 'Nama', 'Judul', 'Pembimbing 1', 'Pembimbing 2'],
+        ['Contoh: 05111940000001', 'Nama Mahasiswa', 'Judul Skripsi/TA', 'Dr. Dosen A', 'Dr. Dosen B'],
+        ['Contoh: 05111940000002', 'Nama Mahasiswa 2', 'Judul Skripsi/TA 2', 'Prof. Dosen C', 'Dr. Dosen D']
+    ];
+    const worksheet = xlsx.utils.aoa_to_sheet(wsData);
+    xlsx.utils.book_append_sheet(workbook, worksheet, 'TemplateJadwalSidang');
+    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Disposition', 'attachment; filename="template_jadwal_sidang.xlsx"');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buffer);
+});
+
+// Endpoint untuk penjadwalan moderator sidang otomatis (OLD - replaced by /sidang/moderator/assign)
 
 // Endpoint untuk penjadwalan moderator sidang otomatis (OLD - replaced by /sidang/moderator/assign)
 app.post('/moderator/assign', upload.single('file'), async (req, res) => {
@@ -930,8 +1452,486 @@ app.post('/moderator/assign', upload.single('file'), async (req, res) => {
     }
 });
 
-// module.exports = app;
+// =================== WHATSAPP NOTIFICATION UTILITIES ===================
 
-app.listen(5000, () => {
-    console.log('Server berjalan di port 5000');
+// Phone number formatting utility
+function formatPhoneNumber(phoneStr) {
+    if (!phoneStr) return null;
+
+    // Remove all non-digit characters
+    let cleaned = phoneStr.replace(/\D/g, '');
+
+    // Handle Indonesian numbers
+    if (cleaned.startsWith('08')) {
+        // Convert 08xxx to 628xxx
+        cleaned = '62' + cleaned.substring(1);
+    } else if (cleaned.startsWith('8')) {
+        // Convert 8xxx to 628xxx
+        cleaned = '62' + cleaned;
+    } else if (cleaned.startsWith('0')) {
+        // Remove leading 0 and add 62
+        cleaned = '62' + cleaned.substring(1);
+    } else if (!cleaned.startsWith('62')) {
+        // Add 62 prefix if not present
+        cleaned = '62' + cleaned;
+    }
+
+    return cleaned;
+}
+
+// Message template generator
+function generateNotificationMessage(role, sidangData) {
+    const {
+        nama_mahasiswa,
+        nrp,
+        tanggal_sidang,
+        jam_mulai,
+        jam_selesai,
+        room,
+        jenis_sidang = 'Skripsi'
+    } = sidangData;
+
+    const tanggalFormatted = new Date(tanggal_sidang).toLocaleDateString('id-ID', {
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+    });
+
+    const baseMessage = `
+🎓 *NOTIFIKASI JADWAL SIDANG ${jenis_sidang.toUpperCase()}*
+
+Yth. Bapak/Ibu,
+
+Dengan hormat, kami informasikan bahwa Anda dijadwalkan sebagai *${role}* pada sidang ${jenis_sidang} berikut:
+
+👤 *Mahasiswa:* ${nama_mahasiswa} (${nrp})
+📅 *Tanggal:* ${tanggalFormatted}
+⏰ *Waktu:* ${jam_mulai} - ${jam_selesai} WIB
+🏢 *Ruang:* ${room}
+📋 *Peran:* ${role}
+
+Mohon untuk hadir tepat waktu. Terima kasih atas perhatian dan kerjasamanya.
+
+Salam hormat,
+Tim Jadwal Sidang
+    `.trim();
+
+    return baseMessage;
+}
+
+// Send WhatsApp message function using internal client
+async function sendWhatsAppMessage(phoneNumber, message) {
+    try {
+        if (!isWhatsAppReady) {
+            return {
+                success: false,
+                error: 'WhatsApp client is not ready. Please ensure WhatsApp is connected.'
+            };
+        }
+
+        const formattedNumber = `${phoneNumber}@c.us`;
+        await whatsappClient.sendMessage(formattedNumber, message);
+
+        return {
+            success: true,
+            data: { message: 'Message sent successfully', to: phoneNumber }
+        };
+    } catch (error) {
+        console.error('WhatsApp send error:', error.message);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
+// Delay function for rate limiting
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// =================== WHATSAPP NOTIFICATION API ENDPOINTS ===================
+
+// Send notification to all dosen in a sidang
+app.post('/notifications/sidang/:sidangId', authenticateToken, async (req, res) => {
+    const { sidangId } = req.params;
+
+    try {
+        // Get sidang details with all dosen information
+        const sidangQuery = `
+            SELECT 
+                si.id, si.nama_mahasiswa, si.nrp, si.tanggal_sidang, 
+                si.jam_mulai_final as jam_mulai, si.jam_selesai_final as jam_selesai,
+                si.room, si.jenis_sidang,
+                d1.nama as moderator_nama, d1.no_hp as moderator_hp,
+                d2.nama as pembimbing_1_nama, d2.no_hp as pembimbing_1_hp,
+                d3.nama as pembimbing_2_nama, d3.no_hp as pembimbing_2_hp,
+                d4.nama as penguji_1_nama, d4.no_hp as penguji_1_hp,
+                d5.nama as penguji_2_nama, d5.no_hp as penguji_2_hp
+            FROM sidang_item si
+            LEFT JOIN dosen d1 ON si.moderator_id = d1.id
+            LEFT JOIN dosen d2 ON si.pembimbing_1_id = d2.id
+            LEFT JOIN dosen d3 ON si.pembimbing_2_id = d3.id
+            LEFT JOIN dosen d4 ON si.penguji_1_id = d4.id
+            LEFT JOIN dosen d5 ON si.penguji_2_id = d5.id
+            WHERE si.id = $1
+        `;
+
+        const result = await pool.query(sidangQuery, [sidangId]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Sidang tidak ditemukan'
+            });
+        }
+
+        const sidangData = result.rows[0];
+        const notifications = [];
+
+        // Define roles and their corresponding data
+        const roles = [
+            { role: 'Moderator', nama: sidangData.moderator_nama, hp: sidangData.moderator_hp },
+            { role: 'Pembimbing 1', nama: sidangData.pembimbing_1_nama, hp: sidangData.pembimbing_1_hp },
+            { role: 'Pembimbing 2', nama: sidangData.pembimbing_2_nama, hp: sidangData.pembimbing_2_hp },
+            { role: 'Penguji 1', nama: sidangData.penguji_1_nama, hp: sidangData.penguji_1_hp },
+            { role: 'Penguji 2', nama: sidangData.penguji_2_nama, hp: sidangData.penguji_2_hp }
+        ];
+
+        // Send notifications to each role
+        for (const roleData of roles) {
+            if (roleData.nama && roleData.hp) {
+                const phoneNumber = formatPhoneNumber(roleData.hp);
+
+                if (phoneNumber) {
+                    const message = generateNotificationMessage(roleData.role, sidangData);
+
+                    // Add delay between messages (2-3 seconds)
+                    if (notifications.length > 0) {
+                        await delay(2500);
+                    }
+
+                    const sendResult = await sendWhatsAppMessage(phoneNumber, message);
+
+                    notifications.push({
+                        role: roleData.role,
+                        nama: roleData.nama,
+                        phone: phoneNumber,
+                        success: sendResult.success,
+                        error: sendResult.error || null,
+                        timestamp: new Date().toISOString()
+                    });
+                } else {
+                    notifications.push({
+                        role: roleData.role,
+                        nama: roleData.nama,
+                        phone: roleData.hp,
+                        success: false,
+                        error: 'Invalid phone number format',
+                        timestamp: new Date().toISOString()
+                    });
+                }
+            } else {
+                notifications.push({
+                    role: roleData.role,
+                    nama: roleData.nama || 'Not assigned',
+                    phone: null,
+                    success: false,
+                    error: 'Dosen not assigned or phone number missing',
+                    timestamp: new Date().toISOString()
+                });
+            }
+        }
+
+        // Calculate success/failure counts
+        const successCount = notifications.filter(n => n.success).length;
+        const failureCount = notifications.length - successCount;
+
+        res.json({
+            success: true,
+            message: `Notification sent to ${successCount} out of ${notifications.length} recipients`,
+            summary: {
+                total: notifications.length,
+                sent: successCount,
+                failed: failureCount
+            },
+            details: notifications,
+            sidang: {
+                id: sidangData.id,
+                mahasiswa: sidangData.nama_mahasiswa,
+                nrp: sidangData.nrp,
+                tanggal: sidangData.tanggal_sidang,
+                jam: `${sidangData.jam_mulai} - ${sidangData.jam_selesai}`
+            }
+        });
+
+    } catch (error) {
+        console.error('Notification error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error while sending notifications',
+            error: error.message
+        });
+    }
 });
+
+// Send batch notifications for all sidang in a group
+app.post('/notifications/group/:groupId', authenticateToken, async (req, res) => {
+    const { groupId } = req.params;
+
+    try {
+        // Get all sidang items in the group
+        const groupQuery = `
+            SELECT 
+                si.id, si.nama_mahasiswa, si.nrp, si.tanggal_sidang, 
+                si.jam_mulai_final as jam_mulai, si.jam_selesai_final as jam_selesai,
+                si.room, si.jenis_sidang,
+                d1.nama as moderator_nama, d1.no_hp as moderator_hp,
+                d2.nama as pembimbing_1_nama, d2.no_hp as pembimbing_1_hp,
+                d3.nama as pembimbing_2_nama, d3.no_hp as pembimbing_2_hp,
+                d4.nama as penguji_1_nama, d4.no_hp as penguji_1_hp,
+                d5.nama as penguji_2_nama, d5.no_hp as penguji_2_hp
+            FROM sidang_item si
+            LEFT JOIN dosen d1 ON si.moderator_id = d1.id
+            LEFT JOIN dosen d2 ON si.pembimbing_1_id = d2.id
+            LEFT JOIN dosen d3 ON si.pembimbing_2_id = d3.id
+            LEFT JOIN dosen d4 ON si.penguji_1_id = d4.id
+            LEFT JOIN dosen d5 ON si.penguji_2_id = d5.id
+            WHERE si.sidang_group_id = $1
+            ORDER BY si.jam_mulai_final ASC
+        `;
+
+        const result = await pool.query(groupQuery, [groupId]);
+
+        if (result.rows.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Tidak ada sidang ditemukan dalam group ini'
+            });
+        }
+
+        const allNotifications = [];
+        let totalSent = 0;
+        let totalFailed = 0;
+
+        // Process each sidang in the group
+        for (const sidangData of result.rows) {
+            const sidangNotifications = [];
+
+            // Define roles and their corresponding data
+            const roles = [
+                { role: 'Moderator', nama: sidangData.moderator_nama, hp: sidangData.moderator_hp },
+                { role: 'Pembimbing 1', nama: sidangData.pembimbing_1_nama, hp: sidangData.pembimbing_1_hp },
+                { role: 'Pembimbing 2', nama: sidangData.pembimbing_2_nama, hp: sidangData.pembimbing_2_hp },
+                { role: 'Penguji 1', nama: sidangData.penguji_1_nama, hp: sidangData.penguji_1_hp },
+                { role: 'Penguji 2', nama: sidangData.penguji_2_nama, hp: sidangData.penguji_2_hp }
+            ];
+
+            // Send notifications to each role
+            for (const roleData of roles) {
+                if (roleData.nama && roleData.hp) {
+                    const phoneNumber = formatPhoneNumber(roleData.hp);
+
+                    if (phoneNumber) {
+                        const message = generateNotificationMessage(roleData.role, sidangData);
+
+                        // Add delay between messages (2-3 seconds)
+                        if (allNotifications.length > 0) {
+                            await delay(2500);
+                        }
+
+                        const sendResult = await sendWhatsAppMessage(phoneNumber, message);
+
+                        const notification = {
+                            sidang_id: sidangData.id,
+                            mahasiswa: sidangData.nama_mahasiswa,
+                            role: roleData.role,
+                            nama: roleData.nama,
+                            phone: phoneNumber,
+                            success: sendResult.success,
+                            error: sendResult.error || null,
+                            timestamp: new Date().toISOString()
+                        };
+
+                        sidangNotifications.push(notification);
+
+                        if (sendResult.success) {
+                            totalSent++;
+                        } else {
+                            totalFailed++;
+                        }
+                    } else {
+                        const notification = {
+                            sidang_id: sidangData.id,
+                            mahasiswa: sidangData.nama_mahasiswa,
+                            role: roleData.role,
+                            nama: roleData.nama,
+                            phone: roleData.hp,
+                            success: false,
+                            error: 'Invalid phone number format',
+                            timestamp: new Date().toISOString()
+                        };
+
+                        sidangNotifications.push(notification);
+                        totalFailed++;
+                    }
+                } else {
+                    const notification = {
+                        sidang_id: sidangData.id,
+                        mahasiswa: sidangData.nama_mahasiswa,
+                        role: roleData.role,
+                        nama: roleData.nama || 'Not assigned',
+                        phone: null,
+                        success: false,
+                        error: 'Dosen not assigned or phone number missing',
+                        timestamp: new Date().toISOString()
+                    };
+
+                    sidangNotifications.push(notification);
+                    totalFailed++;
+                }
+            }
+
+            allNotifications.push({
+                sidang_id: sidangData.id,
+                mahasiswa: sidangData.nama_mahasiswa,
+                nrp: sidangData.nrp,
+                jam: `${sidangData.jam_mulai} - ${sidangData.jam_selesai}`,
+                notifications: sidangNotifications
+            });
+        }
+
+        res.json({
+            success: true,
+            message: `Batch notification completed: ${totalSent} sent, ${totalFailed} failed`,
+            summary: {
+                total_sidang: result.rows.length,
+                total_notifications: totalSent + totalFailed,
+                sent: totalSent,
+                failed: totalFailed
+            },
+            details: allNotifications,
+            group_id: groupId
+        });
+
+    } catch (error) {
+        console.error('Batch notification error:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Server error while sending batch notifications',
+            error: error.message
+        });
+    }
+});
+
+// =================== WHATSAPP API ENDPOINTS ===================
+
+// Route for WhatsApp registration (QR Code)
+app.get("/whatsapp/register", async (req, res) => {
+    if (isWhatsAppReady) {
+        return res.status(200).json({
+            success: true,
+            message: "WhatsApp client is already active and ready to use.",
+        });
+    }
+
+    // Wait for QR Code to be generated
+    setTimeout(async () => {
+        if (!qrCodeString) {
+            return res.status(200).json({
+                success: false,
+                message: "QR Code not available or already scanned.",
+            });
+        }
+
+        try {
+            // Convert QR Code to base64 image
+            const qrImage = await QRCode.toDataURL(qrCodeString);
+            res.status(200).json({
+                success: true,
+                message: "Scan QR Code with your WhatsApp.",
+                qr: qrImage, // QR in base64 format
+            });
+        } catch (error) {
+            console.error("Failed to generate QR Code:", error);
+            res.status(500).json({
+                success: false,
+                message: "Error generating QR Code.",
+                error: error.message,
+            });
+        }
+    }, 1000);
+});
+
+// Route for WhatsApp status check
+app.get("/whatsapp/status", (req, res) => {
+    res.json({
+
+        success: true,
+        whatsapp_ready: isWhatsAppReady,
+        message: isWhatsAppReady
+            ? "WhatsApp client is ready"
+            : "WhatsApp client is not ready. Please scan QR code at /whatsapp/register"
+    });
+});
+
+// Get WhatsApp service status
+app.get('/notifications/status', authenticateToken, async (req, res) => {
+    res.json({
+        success: true,
+        whatsapp_service: isWhatsAppReady ? 'connected' : 'disconnected',
+        whatsapp_ready: isWhatsAppReady,
+        message: isWhatsAppReady
+            ? 'WhatsApp client is ready for sending notifications'
+            : 'WhatsApp client is not ready. Please scan QR code at /whatsapp/register'
+    });
+});
+
+// Test single notification endpoint
+app.post('/notifications/test', authenticateToken, async (req, res) => {
+    const { phone, message } = req.body;
+
+    if (!phone || !message) {
+        return res.status(400).json({
+            success: false,
+            message: 'Phone number and message are required'
+        });
+    }
+
+    try {
+        const formattedPhone = formatPhoneNumber(phone);
+        if (!formattedPhone) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid phone number format'
+            });
+        }
+
+        const result = await sendWhatsAppMessage(formattedPhone, message);
+
+        res.json({
+            success: result.success,
+            message: result.success ? 'Test message sent successfully' : 'Failed to send test message',
+            phone: formattedPhone,
+            error: result.error || null,
+            timestamp: new Date().toISOString()
+        });
+
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            message: 'Server error while sending test message',
+            error: error.message
+        });
+    }
+});
+
+// module.exports = app;
+if (require.main === module) {
+    app.listen(5000, () => {
+        console.log('Server berjalan di port 5000');
+    });
+}
+
+module.exports = app;
