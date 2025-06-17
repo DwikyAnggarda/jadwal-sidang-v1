@@ -941,7 +941,7 @@ app.post('/sidang/batch-assign', authenticateToken, upload.single('file'), async
                     // Insert ke tabel sidang
                     await client.query(
                         `INSERT INTO sidang (
-                            mahasiswa_id, pembimbing_1_id, pembimbing_2_id, penguji_1_id, penguji_2_id, moderator_id, room, tanggal_sidang, jam_mulai_sidang, durasi_sidang, jam_mulai_final, jam_selesai_final
+                            mahasiswa_id, pembimbing_1_id, pembimbing_2_id, penguji_1_id, penguji_2_id, moderator_id, room, tanggal_sidang, durasi_sidang, jam_mulai_sidang, jam_selesai_sidang
                         ) VALUES (
                             $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
                         )`,
@@ -954,7 +954,6 @@ app.post('/sidang/batch-assign', authenticateToken, upload.single('file'), async
                             moderator_id,
                             roomIdx + 1,
                             tanggal_sidang,
-                            jamMulai,
                             durasi,
                             jamMulaiFinal,
                             jamSelesai
@@ -996,22 +995,6 @@ app.post('/sidang/batch-assign', authenticateToken, upload.single('file'), async
         console.error(err);
         return res.status(500).json({ success: false, message: 'Server error: ' + err.message });
     }
-});
-
-// Endpoint untuk download template Excel jadwal sidang
-app.get('/moderator/template', authenticateToken, (req, res) => {
-    const workbook = xlsx.utils.book_new();
-    const wsData = [
-        ['NRP', 'Nama', 'Judul', 'Pembimbing 1', 'Pembimbing 2'],
-        ['Contoh: 05111940000001', 'Nama Mahasiswa', 'Judul Skripsi/TA', 'Dr. Dosen A', 'Dr. Dosen B'],
-        ['Contoh: 05111940000002', 'Nama Mahasiswa 2', 'Judul Skripsi/TA 2', 'Prof. Dosen C', 'Dr. Dosen D']
-    ];
-    const worksheet = xlsx.utils.aoa_to_sheet(wsData);
-    xlsx.utils.book_append_sheet(workbook, worksheet, 'TemplateJadwalSidang');
-    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
-    res.setHeader('Content-Disposition', 'attachment; filename="template_jadwal_sidang.xlsx"');
-    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.send(buffer);
 });
 
 // Endpoint untuk penjadwalan moderator sidang otomatis (OLD - replaced by /sidang/moderator/assign)
@@ -1117,8 +1100,7 @@ app.post('/moderator/assign', upload.single('file'), async (req, res) => {
         if (startMinutes >= endMinutes) {
             return res.status(400).json({ success: false, message: 'Jam akhir harus setelah jam awal.' });
         }
-        // const totalSesi = Math.floor((endMinutes - startMinutes) / durasi);
-        const totalSesi = 3;
+        const totalSesi = Math.floor((endMinutes - startMinutes) / durasi);
         console.log('Total sesi:', totalSesi);
         if (totalSesi <= 0) {
             return res.status(400).json({ success: false, message: 'Rentang waktu tidak cukup untuk satu sesi sidang.' });
@@ -1433,6 +1415,69 @@ app.post('/moderator/assign', upload.single('file'), async (req, res) => {
         // Step 5: Penomoran ulang field no
         hasilAkhir = hasilAkhir.map((m, idx) => ({ ...m, no: idx + 1 }));
 
+        // === SAVE TO DATABASE ===
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+
+            // 1. Insert ke tabel sidang_group
+            const sidangGroupResult = await client.query(`
+                INSERT INTO sidang_group (tanggal_sidang, jam_awal, jam_akhir, jenis_sidang, durasi_sidang, status_sidang, created_at)
+                VALUES ($1, $2, $3, $4, $5, $6, NOW())
+                RETURNING id
+            `, [tanggal_sidang, jam_awal, jam_akhir, jenis_sidang, durasi, 0]);
+
+            const sidangGroupId = sidangGroupResult.rows[0].id;
+
+            // 2. Insert ke tabel sidang_item untuk setiap mahasiswa
+            for (const item of hasilAkhir) {
+                // Cari ID mahasiswa berdasarkan nama
+                const mahasiswaQuery = await client.query('SELECT id FROM mahasiswa WHERE nama = $1', [item.nama_mahasiswa]);
+                const mahasiswaId = mahasiswaQuery.rows[0]?.id;
+
+                // Cari ID dosen berdasarkan nama
+                const pembimbing1Query = await client.query('SELECT id FROM dosen WHERE nama = $1', [item.pembimbing_1]);
+                const pembimbing1Id = pembimbing1Query.rows[0]?.id;
+
+                const pembimbing2Query = await client.query('SELECT id FROM dosen WHERE nama = $1', [item.pembimbing_2]);
+                const pembimbing2Id = pembimbing2Query.rows[0]?.id;
+
+                const penguji1Query = await client.query('SELECT id FROM dosen WHERE nama = $1', [item.penguji_1]);
+                const penguji1Id = penguji1Query.rows[0]?.id;
+
+                const penguji2Query = await client.query('SELECT id FROM dosen WHERE nama = $1', [item.penguji_2]);
+                const penguji2Id = penguji2Query.rows[0]?.id;
+
+                const moderatorQuery = await client.query('SELECT id FROM dosen WHERE nama = $1', [item.moderator]);
+                const moderatorId = moderatorQuery.rows[0]?.id;
+
+                // Insert ke sidang_item
+                await client.query(`
+                    INSERT INTO sidang_item (
+                        mahasiswa_id, pembimbing_1_id, pembimbing_2_id, penguji_1_id, penguji_2_id, 
+                        moderator_id, room, tanggal_sidang, durasi_sidang, jam_mulai_final, 
+                        jam_selesai_final, nrp, nama_mahasiswa, judul, jenis_sidang, 
+                        sidang_group_id, created_at
+                    ) VALUES (
+                        $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, NOW()
+                    )
+                `, [
+                    mahasiswaId, pembimbing1Id, pembimbing2Id, penguji1Id, penguji2Id,
+                    moderatorId, item.kelas, tanggal_sidang, durasi, item.jam_mulai,
+                    item.jam_selesai, item.nrp, item.nama_mahasiswa, item.judul, jenis_sidang,
+                    sidangGroupId
+                ]);
+            }
+
+            await client.query('COMMIT');
+        } catch (dbError) {
+            await client.query('ROLLBACK');
+            console.error('Database error:', dbError);
+            return res.status(500).json({ success: false, message: 'Gagal menyimpan data ke database: ' + dbError.message });
+        } finally {
+            client.release();
+        }
+
         // Warning jika ada kelas yang kekurangan dosen penguji atau jadwal tidak bisa dijadwalkan
         const adaWarning = hasilAkhir.some(m => !m.penguji_1 || !m.penguji_2 || m.jam_mulai === null);
         if (adaWarning) {
@@ -1445,7 +1490,7 @@ app.post('/moderator/assign', upload.single('file'), async (req, res) => {
 
         return res.json({ success: true, data: hasilAkhir });
     } catch (err) {
-        console.error("Error in /sidang/moderator/assign:", err);
+        console.error("Error in /moderator/assign:", err);
         return res.status(500).json({ success: false, message: 'Server error: ' + err.message });
     }
 });
@@ -1838,6 +1883,22 @@ app.get('/sidang-group/:id/export', authenticateToken, async (req, res) => {
         console.error('Error exporting sidang group detail:', err);
         res.status(500).json({ success: false, message: 'Server error: ' + err.message });
     }
+});
+
+// Endpoint untuk download template Excel jadwal sidang
+app.get('/moderator/template', authenticateToken, (req, res) => {
+    const workbook = xlsx.utils.book_new();
+    const wsData = [
+        ['NRP', 'Nama', 'Judul', 'Pembimbing 1', 'Pembimbing 2'],
+        ['Contoh: 05111940000001', 'Nama Mahasiswa', 'Judul Skripsi/TA', 'Dr. Dosen A', 'Dr. Dosen B'],
+        ['Contoh: 05111940000002', 'Nama Mahasiswa 2', 'Judul Skripsi/TA 2', 'Prof. Dosen C', 'Dr. Dosen D']
+    ];
+    const worksheet = xlsx.utils.aoa_to_sheet(wsData);
+    xlsx.utils.book_append_sheet(workbook, worksheet, 'TemplateJadwalSidang');
+    const buffer = xlsx.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    res.setHeader('Content-Disposition', 'attachment; filename="template_jadwal_sidang.xlsx"');
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.send(buffer);
 });
 
 // =================== WHATSAPP NOTIFICATION UTILITIES ===================
