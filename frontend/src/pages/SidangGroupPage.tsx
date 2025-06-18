@@ -4,6 +4,8 @@ import { Button } from '../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
 import { Badge } from '../components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Trash2, Edit, Eye, Download, Send } from 'lucide-react';
 import { toast } from '../components/ui/toast';
 import api from '../api/axios';
@@ -28,7 +30,17 @@ const SidangGroupPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [exportLoading, setExportLoading] = useState(false);
   const [notificationLoading, setNotificationLoading] = useState<number | null>(null);
+  const [editStatusDialog, setEditStatusDialog] = useState(false);
+  const [selectedGroup, setSelectedGroup] = useState<SidangGroup | null>(null);
+  const [newStatus, setNewStatus] = useState<number | null>(null);
+  const [updateLoading, setUpdateLoading] = useState(false);
   const navigate = useNavigate();
+
+  const statusOptions = [
+    { value: 0, label: 'Belum Mulai' },
+    { value: 1, label: 'Sedang Berlangsung' },
+    { value: 2, label: 'Selesai' }
+  ];
 
   const fetchGroups = async () => {
     try {
@@ -144,6 +156,43 @@ const SidangGroupPage: React.FC = () => {
     } finally {
       setNotificationLoading(null);
     }
+  };
+
+  const handleEditStatus = (group: SidangGroup) => {
+    setSelectedGroup(group);
+    setNewStatus(group.status_sidang);
+    setEditStatusDialog(true);
+  };
+
+  const handleUpdateStatus = async () => {
+    if (!selectedGroup || newStatus === null) return;
+
+    setUpdateLoading(true);
+    try {
+      const response = await api.put(`/sidang-group/${selectedGroup.id}/status`, {
+        status_sidang: newStatus
+      });
+
+      if (response.data.success) {
+        toast.success('Status sidang berhasil diubah');
+        setEditStatusDialog(false);
+        fetchGroups(); // Refresh data
+      } else {
+        toast.error(response.data.message || 'Gagal mengubah status sidang');
+      }
+    } catch (error: any) {
+      console.error('Error updating status:', error);
+      const errorMessage = error.response?.data?.message || 'Terjadi kesalahan saat mengubah status';
+      toast.error(errorMessage);
+    } finally {
+      setUpdateLoading(false);
+    }
+  };
+
+  const handleCloseEditDialog = () => {
+    setEditStatusDialog(false);
+    setSelectedGroup(null);
+    setNewStatus(null);
   };
 
   const getStatusBadge = (status: number) => {
@@ -291,10 +340,7 @@ const SidangGroupPage: React.FC = () => {
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => {
-                              // TODO: Implement edit
-                              toast.info('Fitur edit belum difungsikan');
-                            }}
+                            onClick={() => handleEditStatus(group)}
                           >
                             <Edit className="w-4 h-4" />
                           </Button>
@@ -315,6 +361,67 @@ const SidangGroupPage: React.FC = () => {
           )}
         </CardContent>
       </Card>
+
+      {/* Edit Status Dialog */}
+      <Dialog open={editStatusDialog} onOpenChange={handleCloseEditDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Status Sidang</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <p className="text-sm text-gray-600 mb-2">
+                <strong>Grup:</strong> #{selectedGroup?.id} - {selectedGroup?.jenis_sidang}
+              </p>
+              <p className="text-sm text-gray-600 mb-2">
+                <strong>Tanggal:</strong> {selectedGroup ? formatDate(selectedGroup.tanggal_sidang) : ''}
+              </p>
+              <p className="text-sm text-gray-600 mb-4">
+                <strong>Status Saat Ini:</strong> {selectedGroup ? getStatusBadge(selectedGroup.status_sidang) : ''}
+              </p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">
+                Pilih Status Baru:
+              </label>
+              <Select 
+                value={newStatus?.toString() || ''} 
+                onValueChange={(value) => setNewStatus(Number(value))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Pilih status..." />
+                </SelectTrigger>
+                <SelectContent>
+                  {statusOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value.toString()}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {newStatus !== null && newStatus !== selectedGroup?.status_sidang && (
+              <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
+                <p className="text-sm text-yellow-800">
+                  <strong>Konfirmasi:</strong> Anda akan mengubah status dari "{statusOptions.find(s => s.value === selectedGroup?.status_sidang)?.label}" 
+                  menjadi "{statusOptions.find(s => s.value === newStatus)?.label}".
+                </p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={handleCloseEditDialog}>
+              Batal
+            </Button>
+            <Button 
+              onClick={handleUpdateStatus}
+              disabled={updateLoading || newStatus === null || newStatus === selectedGroup?.status_sidang}
+            >
+              {updateLoading ? 'Menyimpan...' : 'Simpan'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

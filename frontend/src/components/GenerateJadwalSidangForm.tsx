@@ -14,6 +14,7 @@ interface FormValues {
   jam_awal: string;
   jam_akhir: string;
   durasi_sidang: string;
+  sesi_sidang: string;
   jenis_sidang: string;
   file: FileList;
 }
@@ -22,6 +23,7 @@ interface Rule {
   id: number;
   jenis_sidang: string;
   durasi_sidang: number;
+  sesi_sidang: number;
   jumlah_penguji: number;
   jam_awal: string;
   jam_akhir: string;
@@ -47,6 +49,7 @@ const GenerateJadwalSidangForm: React.FC = () => {
       jam_awal: '',
       jam_akhir: '',
       durasi_sidang: '60',
+      sesi_sidang: '3',
       jenis_sidang: '',
     },
   });
@@ -62,6 +65,9 @@ const GenerateJadwalSidangForm: React.FC = () => {
         // Set default jenis_sidang ke rule pertama jika ada
         if (response.data.length > 0) {
           form.setValue('jenis_sidang', response.data[0].jenis_sidang);
+          // Auto-fill durasi dan sesi untuk rule pertama
+          form.setValue('durasi_sidang', response.data[0].durasi_sidang.toString());
+          form.setValue('sesi_sidang', response.data[0].jumlah_sesi.toString());
         }
       } catch (err) {
         console.error('Error fetching rules:', err);
@@ -73,6 +79,20 @@ const GenerateJadwalSidangForm: React.FC = () => {
 
     fetchRules();
   }, [form]);
+
+  // Watch jenis_sidang changes dan auto-fill durasi_sidang & sesi_sidang
+  useEffect(() => {
+    const subscription = form.watch((value, { name }) => {
+      if (name === 'jenis_sidang' && value.jenis_sidang) {
+        const selectedRule = rules.find(rule => rule.jenis_sidang === value.jenis_sidang);
+        if (selectedRule) {
+          form.setValue('durasi_sidang', selectedRule.durasi_sidang.toString());
+          form.setValue('sesi_sidang', selectedRule.jumlah_sesi.toString());
+        }
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [form, rules]);
 
   const onSubmit = async (values: FormValues) => {
     setLoading(true);
@@ -86,6 +106,7 @@ const GenerateJadwalSidangForm: React.FC = () => {
       formData.append('jam_awal', values.jam_awal);
       formData.append('jam_akhir', values.jam_akhir);
       formData.append('durasi_sidang', values.durasi_sidang);
+      formData.append('sesi_sidang', values.sesi_sidang);
       formData.append('jenis_sidang', values.jenis_sidang);
       
       if (values.file && values.file.length > 0) {
@@ -240,25 +261,6 @@ const GenerateJadwalSidangForm: React.FC = () => {
           )}
         />
 
-        {/* Durasi Sidang */}
-        <FormField
-          control={form.control}
-          name="durasi_sidang"
-          rules={{ 
-            required: 'Durasi sidang wajib diisi',
-            min: { value: 1, message: 'Durasi minimal 1 menit' }
-          }}
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Durasi Sidang (menit)</FormLabel>
-              <FormControl>
-                <Input type="number" min={1} {...field} required />
-              </FormControl>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
-
         {/* Jenis Sidang */}
         <FormField
           control={form.control}
@@ -287,6 +289,62 @@ const GenerateJadwalSidangForm: React.FC = () => {
                   Memuat data jenis sidang...
                 </p>
               )}
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        {/* Durasi Sidang */}
+        <FormField
+          control={form.control}
+          name="durasi_sidang"
+          rules={{
+            required: 'Durasi sidang wajib diisi',
+            min: { value: 1, message: 'Durasi minimal 1 menit' }
+          }}
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Durasi Sidang (menit)</FormLabel>
+              <FormControl>
+                <Input 
+                  type="number" 
+                  min={1} 
+                  {...field} 
+                  required
+                  className="bg-gray-50"
+                />
+              </FormControl>
+              <p className="text-sm text-gray-500">
+                Durasi otomatis terisi berdasarkan jenis sidang yang dipilih
+              </p>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        {/* Jumlah Sesi */}
+        <FormField
+          control={form.control}
+          name="sesi_sidang"
+          rules={{
+            required: 'Jumlah sesi sidang wajib diisi',
+            min: { value: 1, message: 'Jumlah sesi minimal 1' }
+          }}
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Jumlah Sesi Sidang</FormLabel>
+              <FormControl>
+                <Input 
+                  type="number" 
+                  min={1} 
+                  {...field} 
+                  required
+                  className="bg-gray-50"
+                />
+              </FormControl>
+              <p className="text-sm text-gray-500">
+                Jumlah sesi otomatis terisi berdasarkan jenis sidang yang dipilih
+              </p>
               <FormMessage />
             </FormItem>
           )}
