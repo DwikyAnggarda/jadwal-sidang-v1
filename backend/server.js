@@ -98,12 +98,12 @@ app.get('/rule/:id', authenticateToken, async (req, res) => {
 
 // CREATE rule
 app.post('/rule', authenticateToken, async (req, res) => {
-    const { jenis_sidang, durasi_sidang, jumlah_sesi } = req.body;
-    if (!jenis_sidang || !durasi_sidang || !jumlah_sesi) {
-        return res.status(400).json({ success: false, message: 'Field jenis_sidang, durasi_sidang, jumlah_sesi wajib diisi' });
+    const { jenis_sidang, durasi_sidang } = req.body;
+    if (!jenis_sidang || !durasi_sidang) {
+        return res.status(400).json({ success: false, message: 'Field jenis_sidang, durasi_sidang wajib diisi' });
     }
-    if (isNaN(durasi_sidang) || isNaN(jumlah_sesi) || durasi_sidang <= 0 || jumlah_sesi <= 0) {
-        return res.status(400).json({ success: false, message: 'Durasi dan jumlah sesi harus angka > 0' });
+    if (isNaN(durasi_sidang) || durasi_sidang <= 0) {
+        return res.status(400).json({ success: false, message: 'Durasi harus angka > 0' });
     }
     try {
         // Cek unik
@@ -112,8 +112,8 @@ app.post('/rule', authenticateToken, async (req, res) => {
             return res.status(400).json({ success: false, message: 'Jenis sidang sudah ada' });
         }
         const result = await pool.query(
-            'INSERT INTO rule (jenis_sidang, durasi_sidang, jumlah_sesi) VALUES ($1, $2, $3) RETURNING *',
-            [jenis_sidang, durasi_sidang, jumlah_sesi]
+            'INSERT INTO rule (jenis_sidang, durasi_sidang) VALUES ($1, $2) RETURNING *',
+            [jenis_sidang, durasi_sidang]
         );
         res.json({ success: true, data: result.rows[0] });
     } catch (err) {
@@ -125,12 +125,12 @@ app.post('/rule', authenticateToken, async (req, res) => {
 // UPDATE rule
 app.put('/rule/:id', authenticateToken, async (req, res) => {
     const { id } = req.params;
-    const { jenis_sidang, durasi_sidang, jumlah_sesi } = req.body;
-    if (!jenis_sidang || !durasi_sidang || !jumlah_sesi) {
-        return res.status(400).json({ success: false, message: 'Field jenis_sidang, durasi_sidang, jumlah_sesi wajib diisi' });
+    const { jenis_sidang, durasi_sidang } = req.body;
+    if (!jenis_sidang || !durasi_sidang) {
+        return res.status(400).json({ success: false, message: 'Field jenis_sidang, durasi_sidang wajib diisi' });
     }
-    if (isNaN(durasi_sidang) || isNaN(jumlah_sesi) || durasi_sidang <= 0 || jumlah_sesi <= 0) {
-        return res.status(400).json({ success: false, message: 'Durasi dan jumlah sesi harus angka > 0' });
+    if (isNaN(durasi_sidang) || durasi_sidang <= 0) {
+        return res.status(400).json({ success: false, message: 'Durasi harus angka > 0' });
     }
     try {
         // Cek unik kecuali milik sendiri
@@ -139,8 +139,8 @@ app.put('/rule/:id', authenticateToken, async (req, res) => {
             return res.status(400).json({ success: false, message: 'Jenis sidang sudah ada' });
         }
         const result = await pool.query(
-            'UPDATE rule SET jenis_sidang = $1, durasi_sidang = $2, jumlah_sesi = $3 WHERE id = $4 RETURNING *',
-            [jenis_sidang, durasi_sidang, jumlah_sesi, id]
+            'UPDATE rule SET jenis_sidang = $1, durasi_sidang = $2 WHERE id = $3 RETURNING *',
+            [jenis_sidang, durasi_sidang, id]
         );
         if (result.rows.length === 0) {
             return res.status(404).json({ success: false, message: 'Rule tidak ditemukan' });
@@ -999,11 +999,11 @@ app.post('/sidang/batch-assign', authenticateToken, upload.single('file'), async
 
 // Endpoint untuk penjadwalan moderator sidang otomatis (OLD - replaced by /sidang/moderator/assign)
 app.post('/moderator/assign', authenticateToken, upload.single('file'), async (req, res) => {
-    const { tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang, sesi_sidang } = req.body;
+    const { tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang } = req.body;
 
     // Validasi field wajib
-    if (!tanggal_sidang || !jam_awal || !jam_akhir || !durasi_sidang || !jenis_sidang || !sesi_sidang || !req.file) {
-        return res.status(400).json({ success: false, message: 'Field tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang, sesi_sidang, dan file diperlukan' });
+    if (!tanggal_sidang || !jam_awal || !jam_akhir || !durasi_sidang || !jenis_sidang || !req.file) {
+        return res.status(400).json({ success: false, message: 'Field tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang, dan file diperlukan' });
     }
 
     // Validasi file harus Excel
@@ -1018,10 +1018,10 @@ app.post('/moderator/assign', authenticateToken, upload.single('file'), async (r
     }
 
     // Validasi sesi_sidang harus angka positif
-    const sesiSidang = parseInt(sesi_sidang, 10);
+    /* const sesiSidang = parseInt(sesi_sidang, 10);
     if (isNaN(sesiSidang) || sesiSidang <= 0) {
         return res.status(400).json({ success: false, message: 'Sesi sidang harus angka positif' });
-    }
+    } */
 
     // Validasi jam_awal < jam_akhir
     const [jamAwal, menitAwal] = jam_awal.split(':').map(Number);
@@ -1108,7 +1108,9 @@ app.post('/moderator/assign', authenticateToken, upload.single('file'), async (r
         }
 
         // const totalSesi = Math.floor((endMinutes - startMinutes) / durasi);
-        const totalSesi = sesiSidang;
+        // const totalSesi = sesiSidang;
+
+        const totalSesi = 3;
         // console.log('Total sesi:', totalSesi);
         if (totalSesi <= 0) {
             return res.status(400).json({ success: false, message: 'Rentang waktu tidak cukup untuk satu sesi sidang.' });
@@ -1503,12 +1505,12 @@ app.post('/moderator/assign', authenticateToken, upload.single('file'), async (r
     }
 });
 
-app.post('/moderator/assign-awal', authenticateToken, upload.single('file'), async (req, res) => {
-    const { tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang, sesi_sidang } = req.body;
+app.post('/moderator/assign-awal', upload.single('file'), async (req, res) => {
+    const { tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang } = req.body;
 
     // Validasi field wajib
-    if (!tanggal_sidang || !jam_awal || !jam_akhir || !durasi_sidang || !jenis_sidang || !sesi_sidang || !req.file) {
-        return res.status(400).json({ success: false, message: 'Field tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang, sesi_sidang, dan file diperlukan' });
+    if (!tanggal_sidang || !jam_awal || !jam_akhir || !durasi_sidang || !jenis_sidang || !req.file) {
+        return res.status(400).json({ success: false, message: 'Field tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang, dan file diperlukan' });
     }
 
     // Validasi file harus Excel
@@ -1523,10 +1525,10 @@ app.post('/moderator/assign-awal', authenticateToken, upload.single('file'), asy
     }
 
     // Validasi durasi_sidang harus angka positif
-    const sesiSidang = parseInt(sesi_sidang, 10);
+    /* const sesiSidang = parseInt(sesi_sidang, 10);
     if (isNaN(sesiSidang) || sesiSidang <= 0) {
         return res.status(400).json({ success: false, message: 'Sesi sidang harus angka positif' });
-    }
+    } */
 
     // Validasi jam_awal < jam_akhir
     const [jamAwal, menitAwal] = jam_awal.split(':').map(Number);
@@ -1613,7 +1615,8 @@ app.post('/moderator/assign-awal', authenticateToken, upload.single('file'), asy
             return res.status(400).json({ success: false, message: 'Jam akhir harus setelah jam awal.' });
         }
         // const totalSesi = Math.floor((endMinutes - startMinutes) / durasi);
-        const totalSesi = sesiSidang;
+        // const totalSesi = sesiSidang;
+        const totalSesi = 3;
         if (totalSesi <= 0) {
             return res.status(400).json({ success: false, message: 'Rentang waktu tidak cukup untuk satu sesi sidang.' });
         }
@@ -1692,12 +1695,12 @@ app.post('/moderator/assign-awal', authenticateToken, upload.single('file'), asy
     }
 });
 
-app.post('/penguji/assign-awal', authenticateToken, upload.single('file'), async (req, res) => {
-    const { tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang, sesi_sidang } = req.body;
+app.post('/penguji/assign-awal', upload.single('file'), async (req, res) => {
+    const { tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang } = req.body;
 
     // Validasi field wajib
-    if (!tanggal_sidang || !jam_awal || !jam_akhir || !durasi_sidang || !jenis_sidang || !sesi_sidang || !req.file) {
-        return res.status(400).json({ success: false, message: 'Field tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang, sesi_sidang, dan file diperlukan' });
+    if (!tanggal_sidang || !jam_awal || !jam_akhir || !durasi_sidang || !jenis_sidang || !req.file) {
+        return res.status(400).json({ success: false, message: 'Field tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang, dan file diperlukan' });
     }
 
     // Validasi file harus Excel
@@ -1712,10 +1715,10 @@ app.post('/penguji/assign-awal', authenticateToken, upload.single('file'), async
     }
 
     // Validasi sesi_sidang harus angka positif
-    const sesiSidang = parseInt(sesi_sidang, 10);
+    /* const sesiSidang = parseInt(sesi_sidang, 10);
     if (isNaN(sesiSidang) || sesiSidang <= 0) {
         return res.status(400).json({ success: false, message: 'Sesi sidang harus angka positif' });
-    }
+    } */
 
     // Validasi jam_awal < jam_akhir
     const [jamAwal, menitAwal] = jam_awal.split(':').map(Number);
@@ -1801,7 +1804,8 @@ app.post('/penguji/assign-awal', authenticateToken, upload.single('file'), async
         if (startMinutes >= endMinutes) {
             return res.status(400).json({ success: false, message: 'Jam akhir harus setelah jam awal.' });
         }
-        const totalSesi = sesiSidang;
+        // const totalSesi = sesiSidang;
+        const totalSesi = 3;
         if (totalSesi <= 0) {
             return res.status(400).json({ success: false, message: 'Sesi sidang tidak valid.' });
         }
@@ -2077,17 +2081,17 @@ app.post('/penguji/assign-awal', authenticateToken, upload.single('file'), async
         // Kembalikan response
         return res.json({ success: true, data: hasilAkhir });
     } catch (err) {
-        console.error("Error in /moderator/assign-awal:", err);
+        console.error("Error in /penguji/assign-awal:", err);
         return res.status(500).json({ success: false, message: 'Server error: ' + err.message });
     }
 });
 
-app.post('/sidang/preview', authenticateToken, upload.single('file'), async (req, res) => {
-    const { tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang, sesi_sidang } = req.body;
+app.post('/sidang/preview', upload.single('file'), async (req, res) => {
+    const { tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang } = req.body;
 
     // Validasi field wajib
-    if (!tanggal_sidang || !jam_awal || !jam_akhir || !durasi_sidang || !jenis_sidang || !sesi_sidang || !req.file) {
-        return res.status(400).json({ success: false, message: 'Field tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang, sesi_sidang, dan file diperlukan' });
+    if (!tanggal_sidang || !jam_awal || !jam_akhir || !durasi_sidang || !jenis_sidang || !req.file) {
+        return res.status(400).json({ success: false, message: 'Field tanggal_sidang, jam_awal, jam_akhir, durasi_sidang, jenis_sidang, dan file diperlukan' });
     }
 
     // Validasi file harus Excel
@@ -2102,10 +2106,10 @@ app.post('/sidang/preview', authenticateToken, upload.single('file'), async (req
     }
 
     // Validasi sesi_sidang harus angka positif
-    const sesiSidang = parseInt(sesi_sidang, 10);
+    /* const sesiSidang = parseInt(sesi_sidang, 10);
     if (isNaN(sesiSidang) || sesiSidang <= 0) {
         return res.status(400).json({ success: false, message: 'Sesi sidang harus angka positif' });
-    }
+    } */
 
     // Validasi jam_awal < jam_akhir
     const [jamAwal, menitAwal] = jam_awal.split(':').map(Number);
@@ -2193,7 +2197,8 @@ app.post('/sidang/preview', authenticateToken, upload.single('file'), async (req
         }
 
         // const totalSesi = Math.floor((endMinutes - startMinutes) / durasi);
-        const totalSesi = sesiSidang;
+        // const totalSesi = sesiSidang;
+        const totalSesi = 3;
         // console.log('Total sesi:', totalSesi);
         if (totalSesi <= 0) {
             return res.status(400).json({ success: false, message: 'Rentang waktu tidak cukup untuk satu sesi sidang.' });
@@ -2426,11 +2431,11 @@ app.post('/sidang/preview', authenticateToken, upload.single('file'), async (req
                         jam_mulai: jamMulai,
                         jam_selesai: jamSelesai,
                         nrp: m.nrp,
-                        mahasiswa: m.nama,
+                        mahasiswa: m.mahasiswa,
                         judul: m.judul,
                         moderator: m.moderator,
-                        pembimbing_1: m.pembimbing_1_nama,
-                        pembimbing_2: m.pembimbing_2_nama,
+                        pembimbing_1: m.pembimbing_1,
+                        pembimbing_2: m.pembimbing_2,
                         penguji_1,
                         penguji_2
                     });
@@ -2446,6 +2451,9 @@ app.post('/sidang/preview', authenticateToken, upload.single('file'), async (req
                 });
                 for (let idx = 0; idx < kelas.length; idx++) {
                     const m = kelas[idx];
+
+                    // console.log('m:', m);
+
                     let penguji_1 = null;
                     let penguji_2 = null;
                     if (pengujiKelas.length === 2) {
@@ -2475,11 +2483,11 @@ app.post('/sidang/preview', authenticateToken, upload.single('file'), async (req
                         jam_mulai: jamMulai,
                         jam_selesai: jamSelesai,
                         nrp: m.nrp,
-                        mahasiswa: m.nama,
+                        mahasiswa: m.mahasiswa,
                         judul: m.judul,
                         moderator: m.moderator,
-                        pembimbing_1: m.pembimbing_1_nama,
-                        pembimbing_2: m.pembimbing_2_nama,
+                        pembimbing_1: m.pembimbing_1,
+                        pembimbing_2: m.pembimbing_2,
                         penguji_1,
                         penguji_2
                     });
@@ -2491,6 +2499,8 @@ app.post('/sidang/preview', authenticateToken, upload.single('file'), async (req
 
         // Penomoran ulang field no
         hasilAkhir = hasilAkhir.map((m, idx) => ({ ...m, no: idx + 1 }));
+
+        // console.log('Hasil akhir:', hasilAkhir);
 
         // Warning jika ada kelas yang kekurangan dosen penguji atau jadwal tidak bisa dijadwalkan
         const adaWarning = hasilAkhir.some(m => !m.penguji_1 || !m.penguji_2 || m.jam_mulai === null);
@@ -2604,8 +2614,9 @@ app.get('/sidang-group/:id/detail', authenticateToken, async (req, res) => {
             LEFT JOIN dosen d_peng1 ON si.penguji_1_id = d_peng1.id
             LEFT JOIN dosen d_peng2 ON si.penguji_2_id = d_peng2.id
             WHERE si.sidang_group_id = $1
-            ORDER BY si.room, si.jam_mulai_final
-        `;
+            ORDER BY si.id
+            `;
+            // ORDER BY si.room, si.jam_mulai_final
 
         const itemsResult = await pool.query(itemsQuery, [id]);
 

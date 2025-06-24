@@ -43,7 +43,7 @@ const LoginPage: React.FC = () => {
             Jadwal Sidang v1
           </h1>
           <p className="text-gray-600">
-            Sistem Manajemen Jadwal Sidang
+            Login untuk mengakses sistem
           </p>
         </div>
       </div>

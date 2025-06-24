@@ -14,7 +14,7 @@ interface FormValues {
   jam_awal: string;
   jam_akhir: string;
   durasi_sidang: string;
-  sesi_sidang: string;
+  // sesi_sidang: string;
   jenis_sidang: string;
   file: FileList;
 }
@@ -23,7 +23,7 @@ interface Rule {
   id: number;
   jenis_sidang: string;
   durasi_sidang: number;
-  sesi_sidang: number;
+  // sesi_sidang: number;
   jumlah_penguji: number;
   jam_awal: string;
   jam_akhir: string;
@@ -49,7 +49,7 @@ const GenerateJadwalSidangForm: React.FC = () => {
       jam_awal: '',
       jam_akhir: '',
       durasi_sidang: '60',
-      sesi_sidang: '3',
+      // sesi_sidang: '3',
       jenis_sidang: '',
     },
   });
@@ -67,7 +67,7 @@ const GenerateJadwalSidangForm: React.FC = () => {
           form.setValue('jenis_sidang', response.data[0].jenis_sidang);
           // Auto-fill durasi dan sesi untuk rule pertama
           form.setValue('durasi_sidang', response.data[0].durasi_sidang.toString());
-          form.setValue('sesi_sidang', response.data[0].jumlah_sesi.toString());
+          // form.setValue('sesi_sidang', response.data[0].jumlah_sesi.toString());
         }
       } catch (err) {
         console.error('Error fetching rules:', err);
@@ -87,7 +87,7 @@ const GenerateJadwalSidangForm: React.FC = () => {
         const selectedRule = rules.find(rule => rule.jenis_sidang === value.jenis_sidang);
         if (selectedRule) {
           form.setValue('durasi_sidang', selectedRule.durasi_sidang.toString());
-          form.setValue('sesi_sidang', selectedRule.jumlah_sesi.toString());
+          // form.setValue('sesi_sidang', selectedRule.jumlah_sesi.toString());
         }
       }
     });
@@ -106,7 +106,7 @@ const GenerateJadwalSidangForm: React.FC = () => {
       formData.append('jam_awal', values.jam_awal);
       formData.append('jam_akhir', values.jam_akhir);
       formData.append('durasi_sidang', values.durasi_sidang);
-      formData.append('sesi_sidang', values.sesi_sidang);
+      // formData.append('sesi_sidang', values.sesi_sidang);
       formData.append('jenis_sidang', values.jenis_sidang);
       
       if (values.file && values.file.length > 0) {
@@ -323,7 +323,7 @@ const GenerateJadwalSidangForm: React.FC = () => {
         />
 
         {/* Jumlah Sesi */}
-        <FormField
+        {/* <FormField
           control={form.control}
           name="sesi_sidang"
           rules={{
@@ -348,7 +348,7 @@ const GenerateJadwalSidangForm: React.FC = () => {
               <FormMessage />
             </FormItem>
           )}
-        />
+        /> */}
 
         {/* Template Download */}
         <div className="bg-blue-50 p-4 rounded-lg">

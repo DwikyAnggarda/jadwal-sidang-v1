@@ -8,13 +8,13 @@ interface Rule {
   id: number;
   jenis_sidang: string;
   durasi_sidang: number;
-  jumlah_sesi: number;
+  // jumlah_sesi: number;
 }
 
 const defaultForm: Omit<Rule, 'id'> = {
   jenis_sidang: '',
   durasi_sidang: 60,
-  jumlah_sesi: 3,
+  // jumlah_sesi: 3,
 };
 
 const RuleList: React.FC = () => {
@@ -50,7 +50,8 @@ const RuleList: React.FC = () => {
     setModalOpen(true);
   };
   const openEdit = (rule: Rule) => {
-    setForm({ jenis_sidang: rule.jenis_sidang, durasi_sidang: rule.durasi_sidang, jumlah_sesi: rule.jumlah_sesi });
+    // setForm({ jenis_sidang: rule.jenis_sidang, durasi_sidang: rule.durasi_sidang, jumlah_sesi: rule.jumlah_sesi });
+    setForm({ jenis_sidang: rule.jenis_sidang, durasi_sidang: rule.durasi_sidang });
     setEditId(rule.id);
     setFormError(null);
     setModalOpen(true);
@@ -106,7 +107,7 @@ const RuleList: React.FC = () => {
           <tr>
             <th className="border px-2 py-1">Jenis Sidang</th>
             <th className="border px-2 py-1">Durasi Sidang (menit)</th>
-            <th className="border px-2 py-1">Jumlah Sesi</th>
+            {/* <th className="border px-2 py-1">Jumlah Sesi</th> */}
             <th className="border px-2 py-1">Aksi</th>
           </tr>
         </thead>
@@ -119,7 +120,7 @@ const RuleList: React.FC = () => {
             <tr key={rule.id}>
               <td className="border px-2 py-1">{rule.jenis_sidang}</td>
               <td className="border px-2 py-1">{rule.durasi_sidang}</td>
-              <td className="border px-2 py-1">{rule.jumlah_sesi}</td>
+              {/* <td className="border px-2 py-1">{rule.jumlah_sesi}</td> */}
               <td className="border px-2 py-1 flex gap-2">
                 <Button size="sm" variant="outline" onClick={() => openEdit(rule)}>Edit</Button>
                 <Button size="sm" variant="destructive" onClick={() => handleDelete(rule.id)}>Hapus</Button>
@@ -142,10 +143,10 @@ const RuleList: React.FC = () => {
               <label className="block text-sm font-medium">Durasi Sidang (menit)</label>
               <input name="durasi_sidang" type="number" min={1} value={form.durasi_sidang} onChange={handleChange} className="border rounded px-2 py-1 w-full" required />
             </div>
-            <div>
+            {/* <div>
               <label className="block text-sm font-medium">Jumlah Sesi</label>
               <input name="jumlah_sesi" type="number" min={1} value={form.jumlah_sesi} onChange={handleChange} className="border rounded px-2 py-1 w-full" required />
-            </div>
+            </div> */}
             {formError && <Alert variant="destructive"><AlertTitle>Error</AlertTitle><AlertDescription>{formError}</AlertDescription></Alert>}
             <div className="flex justify-end gap-2">
               <Button variant="outline" type="button" onClick={closeModal}>Batal</Button>
