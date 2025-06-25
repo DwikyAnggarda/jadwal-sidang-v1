@@ -3,7 +3,7 @@ import axios from 'axios';
 // Create axios instance
 const apiClient = axios.create({
   baseURL: 'http://localhost:5000',
-  timeout: 10000,
+  timeout: 60000,
 });
 
 // Request interceptor to add JWT token
