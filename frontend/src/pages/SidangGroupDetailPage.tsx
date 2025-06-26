@@ -269,7 +269,7 @@ const SidangGroupDetailPage: React.FC = () => {
                     <TableHead>Pembimbing 2</TableHead>
                     <TableHead>Penguji 1</TableHead>
                     <TableHead>Penguji 2</TableHead>
-                    <TableHead>Aksi</TableHead>
+                    <TableHead>Kirim Notifikasi</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
