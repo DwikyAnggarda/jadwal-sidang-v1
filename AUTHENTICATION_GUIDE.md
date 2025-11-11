@@ -102,7 +102,7 @@ DB_USER=postgres
 DB_HOST=localhost
 DB_NAME=jadwal_sidang
 DB_PASSWORD=your_password
-DB_PORT=5432
+DB_PORT=5417
 
 # JWT
 JWT_SECRET=your-super-secret-jwt-key-change-this-in-production

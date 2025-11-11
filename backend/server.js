@@ -9,6 +9,7 @@ const path = require('path');
 const axios = require('axios');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const QRCode = require('qrcode');
+require('dotenv').config();
 
 // Import authentication middleware and routes
 const { authenticateToken } = require('./middleware/auth');
@@ -3442,8 +3443,8 @@ app.post('/notifications/test', authenticateToken, async (req, res) => {
 
 // module.exports = app;
 if (require.main === module) {
-    app.listen(5000, () => {
-        console.log('Server berjalan di port 5000');
+    app.listen(process.env.PORT || 5000, () => {
+        console.log(`Server berjalan di port ${process.env.PORT || 5000}`);
     });
 }
 
